@@ -29,15 +29,6 @@ class BUSIDataset(Dataset):
         if not self.image_paths:
             raise ValueError("No images found in the dataset directory.")
 
-        # Define training augmentations
-        self.train_augmentations = transforms.Compose([
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomRotation(degrees=15),
-            transforms.RandomResizedCrop(size=(256, 256), scale=(0.9, 1.1), ratio=(1.0, 1.0)),
-            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
-        ]) if split == 'train' else transforms.Compose([])
-
     def __len__(self):
         return len(self.image_paths)
 
@@ -48,10 +39,6 @@ class BUSIDataset(Dataset):
         except Exception as e:
             print(f"Error loading image {img_path}: {e}")
             image = Image.new('L', (256, 256), color=0)
-
-        # Apply augmentations for training
-        if self.split == 'train':
-            image = self.train_augmentations(image)
 
         if self.transform:
             image = self.transform(image)
