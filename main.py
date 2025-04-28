@@ -44,7 +44,13 @@ def main(args):
     print_gpu_info()
     seed_everything(42)
 
+    # Create timestamped output directory
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = os.path.join("./outs", timestamp)
+    os.makedirs(output_dir, exist_ok=True)
+
     config = Config()
+    config.output_dir = output_dir  # Store output_dir in config for visualize_sample_images
     print("🔧 Configuration:")
     print(f"Mode: {args.mode}")
     print(f"Device: {config.device}")
@@ -62,7 +68,11 @@ def main(args):
         print("\n🚀 Starting Pretraining (Noise2Void)...")
         train_loader, val_loader, test_loader = get_dataloaders(config, mode='pretrain')
         print("📸 Visualizing sample pretrain images...")
-        visualize_sample_images(train_loader, mode='pretrain', save_path="outs/sample_images_pretrain.png")
+        visualize_sample_images(
+            train_loader,
+            mode='pretrain',
+            save_path=os.path.join(output_dir, "sample_images_pretrain.png")
+        )
 
         model = get_model(model_name="resnet", pretrained=True).to(config.device)
         print("🧠 Model initialized: ModifiedResNet")
@@ -84,7 +94,11 @@ def main(args):
         print("\n🚀 Starting Fine-tuning (Noisier2Noise)...")
         train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
         print("📸 Visualizing sample finetune images...")
-        visualize_sample_images(train_loader, mode='finetune', save_path="outs/sample_images_finetune.png")
+        visualize_sample_images(
+            train_loader,
+            mode='finetune',
+            save_path=os.path.join(output_dir, "sample_images_finetune.png")
+        )
 
         model = get_model(model_name="resnet", pretrained=False).to(config.device)
         print("🧠 Model initialized: ModifiedResNet")

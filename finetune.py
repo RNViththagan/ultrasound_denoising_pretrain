@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from utils import calculate_psnr, save_checkpoint
 from model import get_model
 from datetime import datetime
+import os
 
 def finetune(model, train_loader, val_loader, config):
     """
@@ -79,9 +80,9 @@ def finetune(model, train_loader, val_loader, config):
     save_checkpoint(model, config.checkpoint_dir, final_filename)
 
     # Plotting
-    plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, config.noise_std)
+    plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, config.noise_std, config.output_dir)
 
-def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, noise_std):
+def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, noise_std, output_dir):
     epochs = range(1, len(train_losses)+1)
     plt.figure(figsize=(12, 5))
 
@@ -104,8 +105,10 @@ def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, noise_std):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig(f"finetune_metrics_noise{noise_std}.png")
+    save_path = os.path.join(output_dir, f"finetune_metrics_noise{noise_std}.png")
+    plt.savefig(save_path)
     plt.show()
+    print(f"📸 Saved metrics plot to {save_path}")
 
 def main():
     from config import Config
@@ -116,7 +119,13 @@ def main():
     print_gpu_info()
     seed_everything(42)
 
+    # Create timestamped output directory
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = os.path.join("./outs", timestamp)
+    os.makedirs(output_dir, exist_ok=True)
+
     config = Config()
+    config.output_dir = output_dir  # Store output_dir in config for plot_metrics
     train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
 
     model = get_model(model_name="resnet", pretrained=False).to(config.device)

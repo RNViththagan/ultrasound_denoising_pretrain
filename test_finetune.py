@@ -137,9 +137,9 @@ def test_model(model, test_loader, config, checkpoint_path, save_dir="test_outpu
     print(f"Average Test Loss: {avg_test_loss:.4f}")
     print(f"Average Test PSNR: {avg_test_psnr:.2f} dB")
 
-    visualize_results(input_images, denoised_images, save_dir, config.noise_std)
+    visualize_results(input_images, denoised_images, config.output_dir, config.noise_std)
 
-def visualize_results(input_images, denoised_images, save_dir, noise_std):
+def visualize_results(input_images, denoised_images, output_dir, noise_std):
     # Denormalize images
     input_images = input_images * 0.5 + 0.5
     denoised_images = denoised_images * 0.5 + 0.5
@@ -162,16 +162,28 @@ def visualize_results(input_images, denoised_images, save_dir, noise_std):
         plt.axis('off')
 
     plt.tight_layout()
-    save_path = os.path.join(save_dir, f"test_results_finetune_noise{noise_std}.png")
+    save_path = os.path.join(output_dir, f"test_results_finetune_noise{noise_std}.png")
     plt.savefig(save_path)
     plt.show()
     print(f"📸 Saved visualization to {save_path}")
+
+    # Save as output.png (assuming this is the intended file)
+    output_save_path = os.path.join(output_dir, "output.png")
+    plt.savefig(output_save_path)
+    print(f"📸 Saved visualization as {output_save_path}")
 
 def main():
     print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_gpu_info()
     seed_everything(42)
+
+    # Create timestamped output directory
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = os.path.join("./outs", timestamp)
+    os.makedirs(output_dir, exist_ok=True)
+
     config = Config()
+    config.output_dir = output_dir  # Store output_dir in config for visualize_results
     _, _, test_loader = get_dataloaders(config, mode='finetune')
     print(f"🧪 Testing on {len(test_loader.dataset)} test images")
     model = get_model(model_name="resnet", pretrained=False).to(config.device)
