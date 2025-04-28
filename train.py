@@ -105,3 +105,22 @@ def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs):
 
     plt.tight_layout()
     plt.show()
+
+def main():
+    from config import Config
+    from dataset import get_dataloaders
+    from model import get_model
+    from utils import seed_everything, print_gpu_info
+
+    print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print_gpu_info()
+    seed_everything(42)
+
+    config = Config()
+    train_loader, val_loader, _ = get_dataloaders(config, mode='pretrain')
+
+    model = get_model(model_name="resnet", pretrained=True).to(config.device)
+    pretrain(model, train_loader, val_loader, config)
+
+if __name__ == "__main__":
+    main()
