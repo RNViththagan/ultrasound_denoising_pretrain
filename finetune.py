@@ -112,6 +112,7 @@ def main():
     from dataset import get_dataloaders
     from utils import seed_everything, print_gpu_info
 
+    print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_gpu_info()
     seed_everything(42)
 

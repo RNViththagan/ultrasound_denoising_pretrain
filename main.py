@@ -9,6 +9,7 @@ from test_finetune import test_model as test_finetune
 from utils import seed_everything, print_gpu_info
 import os
 import argparse
+from datetime import datetime
 from test_finetune import get_latest_checkpoint
 
 def visualize_sample_images(loader, num_images=4, mode='pretrain', save_path="sample_images.png"):
@@ -39,6 +40,7 @@ def visualize_sample_images(loader, num_images=4, mode='pretrain', save_path="sa
     print(f"📸 Saved sample images to {save_path}")
 
 def main(args):
+    print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_gpu_info()
     seed_everything(42)
 

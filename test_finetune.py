@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import os
 import glob
+from datetime import datetime
 from config import Config
 from dataset import get_dataloaders
 from model import get_model
@@ -167,6 +168,7 @@ def visualize_results(input_images, denoised_images, save_dir, noise_std):
     print(f"📸 Saved visualization to {save_path}")
 
 def main():
+    print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_gpu_info()
     seed_everything(42)
     config = Config()

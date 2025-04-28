@@ -5,6 +5,7 @@ import torchvision.utils as vutils
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import os
+from datetime import datetime
 from config import Config
 from dataset import get_dataloaders
 from model import get_model
@@ -77,6 +78,7 @@ def visualize_results(input_images, output_images, original_images, save_dir):
     print(f"📸 Saved visualization to {os.path.join(save_dir, 'test_results_pretrain.png')}")
 
 def main():
+    print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_gpu_info()
     seed_everything(42)
     config = Config()

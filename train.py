@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from datetime import datetime
 from utils import calculate_psnr, save_checkpoint
 
 def pretrain(model, train_loader, val_loader, config, pretrained_path=None):
