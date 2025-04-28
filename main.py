@@ -9,6 +9,7 @@ from test_finetune import test_model as test_finetune
 from utils import seed_everything, print_gpu_info
 import os
 import argparse
+from test_finetune import get_latest_checkpoint
 
 def visualize_sample_images(loader, num_images=4, mode='pretrain', save_path="sample_images.png"):
     import matplotlib.pyplot as plt
@@ -97,7 +98,7 @@ def main(args):
 
         # Test Fine-tuned Model
         print("\n🧪 Testing Fine-tuned Model...")
-        finetuned_path = os.path.join(config.checkpoint_dir, f"finetuned_resnet_noise{config.noise_std}_final_{config._timestamp}.pth")
+        finetuned_path = get_latest_checkpoint(config.checkpoint_dir, config.noise_std)
         test_finetune(model, test_loader, config, checkpoint_path=finetuned_path)
 
 if __name__ == "__main__":
