@@ -3,14 +3,16 @@ from PIL import Image
 from torch.utils.data import Dataset, random_split, DataLoader
 import torch
 import numpy as np
+from torchvision import transforms
 
 class BUSIDataset(Dataset):
-    def __init__(self, root_dir, transform=None, mode='pretrain', mask_ratio=0.1, noise_std=0.1):
+    def __init__(self, root_dir, transform=None, mode='pretrain', mask_ratio=0.1, noise_std=0.1, split='train'):
         self.root_dir = root_dir
         self.transform = transform
         self.mode = mode  # 'pretrain' (Noise2Void), 'finetune' (Noisier2Noise)
         self.mask_ratio = mask_ratio
         self.noise_std = noise_std
+        self.split = split  # 'train', 'val', or 'test'
         self.image_paths = []
         self.class_counts = {'benign': 0, 'malignant': 0, 'normal': 0}
 
@@ -27,6 +29,15 @@ class BUSIDataset(Dataset):
         if not self.image_paths:
             raise ValueError("No images found in the dataset directory.")
 
+        # Define training augmentations
+        self.train_augmentations = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomRotation(degrees=15),
+            transforms.RandomResizedCrop(size=(256, 256), scale=(0.9, 1.1), ratio=(1.0, 1.0)),
+            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        ]) if split == 'train' else transforms.Compose([])
+
     def __len__(self):
         return len(self.image_paths)
 
@@ -37,6 +48,10 @@ class BUSIDataset(Dataset):
         except Exception as e:
             print(f"Error loading image {img_path}: {e}")
             image = Image.new('L', (256, 256), color=0)
+
+        # Apply augmentations for training
+        if self.split == 'train':
+            image = self.train_augmentations(image)
 
         if self.transform:
             image = self.transform(image)
@@ -63,13 +78,16 @@ class BUSIDataset(Dataset):
         }
 
 def get_dataloaders(config, mode='pretrain'):
-    dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std)
-    stats = dataset.get_stats()
+    train_dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std, split='train')
+    val_dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std, split='val')
+    test_dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std, split='test')
+
+    stats = train_dataset.get_stats()
     print("📊 Dataset Statistics:")
     print(f"Total Images: {stats['total_images']}")
     print(f"Class Counts: {stats['class_counts']}")
 
-    n_total = len(dataset)
+    n_total = len(train_dataset)
     n_train = int(n_total * config.split_ratio[0])
     n_val = int(n_total * config.split_ratio[1])
     n_test = n_total - n_train - n_val
@@ -77,7 +95,7 @@ def get_dataloaders(config, mode='pretrain'):
     print(f"Train/Val/Test Split: {n_train}/{n_val}/{n_test} "
           f"({config.split_ratio[0]*100:.1f}%/{config.split_ratio[1]*100:.1f}%/{config.split_ratio[2]*100:.1f}%)")
 
-    train_set, val_set, test_set = random_split(dataset, [n_train, n_val, n_test])
+    train_set, val_set, test_set = random_split(train_dataset, [n_train, n_val, n_test])
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False, num_workers=0)
