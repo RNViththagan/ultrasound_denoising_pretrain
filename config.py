@@ -9,7 +9,7 @@ class Config:
         self.pretrain_lr = 1e-4
         self.finetune_lr = 1e-5  # Lower for fine-tuning stability
         self.batch_size = 8
-        self.data_dir = "../Data_sets/BUSI/"
+        self.data_dir = "../Data_sets/BUSI_augmented/"  # Use augmented dataset
         self.image_size = (256, 256)
         self.split_ratio = [0.7, 0.15, 0.15]  # train, val, test
         self.checkpoint_dir = "checkpoints/"
@@ -17,7 +17,6 @@ class Config:
         self.output_dir = "./outs"  # Default output directory, overridden by main.py or finetune.py
 
         self.transform = transforms.Compose([
-            #transforms.Grayscale(num_output_channels=1),
             transforms.Resize(self.image_size),
             transforms.ToTensor(),
         ])
