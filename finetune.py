@@ -11,7 +11,7 @@ def finetune(model, train_loader, val_loader, config):
     """
     Fine-tune the model for Noisier2Noise denoising.
     - Input: Z (doubly-noisy, Y + Y*M).
-    - Target: Y (singly-noisy, BUSI images, pseudo-clean).
+    - Target: Y (input, pseudo-clean, BUSI images).
     - Goal: Learn f(Z) ≈ Y.
     """
     loss_fn = nn.MSELoss()
@@ -28,18 +28,18 @@ def finetune(model, train_loader, val_loader, config):
         running_ssim = 0
 
         loop = tqdm(train_loader, desc=f"[Finetune Epoch {epoch+1}/{config.finetune_epochs}]")
-        for doubly_noisy, singly_noisy in loop:
-            doubly_noisy, singly_noisy = doubly_noisy.to(config.device), singly_noisy.to(config.device)
+        for doubly_noisy, input in loop:
+            doubly_noisy, input = doubly_noisy.to(config.device), input.to(config.device)
 
             output = model(doubly_noisy)  # f(Z)
-            loss = loss_fn(output, singly_noisy)  # MSE(f(Z), Y)
+            loss = loss_fn(output, input)  # MSE(f(Z), Y)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             psnr = calculate_psnr(loss).item()
-            ssim = calculate_ssim(output, singly_noisy).item()
+            ssim = calculate_ssim(output, input).item()
             running_loss += loss.item()
             running_psnr += psnr
             running_ssim += ssim
@@ -56,13 +56,13 @@ def finetune(model, train_loader, val_loader, config):
         val_psnr = 0
         val_ssim = 0
         with torch.no_grad():
-            for doubly_noisy, singly_noisy in val_loader:
-                doubly_noisy, singly_noisy = doubly_noisy.to(config.device), singly_noisy.to(config.device)
+            for doubly_noisy, input in val_loader:
+                doubly_noisy, input = doubly_noisy.to(config.device), input.to(config.device)
                 val_output = model(doubly_noisy)
-                v_loss = loss_fn(val_output, singly_noisy)
+                v_loss = loss_fn(val_output, input)
                 val_loss += v_loss.item()
                 val_psnr += calculate_psnr(v_loss).item()
-                val_ssim += calculate_ssim(val_output, singly_noisy).item()
+                val_ssim += calculate_ssim(val_output, input).item()
 
         avg_val_loss = val_loss / len(val_loader)
         avg_val_psnr = val_psnr / len(val_loader)
