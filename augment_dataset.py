@@ -1,85 +1,66 @@
 import os
+import argparse
 from PIL import Image
-import torch
-from torchvision import transforms
-from datetime import datetime
-from tqdm import tqdm
+import torchvision.transforms as transforms
+import random
 
 def create_augmented_dataset(input_dir, output_dir, num_augmentations=5):
     """
-    Generate an augmented BUSI dataset by creating multiple augmented versions of each image.
-    Save to output_dir with the same structure (benign/, malignant/, normal/).
+    Create an augmented dataset from the BUSI dataset.
+    For each image, save the original and generate augmented versions.
     """
-    # Define augmentation pipeline
-    augmentation_pipeline = transforms.Compose([
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=15),
-        transforms.RandomResizedCrop(size=(256, 256), scale=(0.9, 1.1), ratio=(1.0, 1.0)),
-        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2),
-    ])
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    # Create output directories
-    for label in ['benign', 'malignant', 'normal']:
-        os.makedirs(os.path.join(output_dir, label), exist_ok=True)
-
-    total_images = 0
-    class_counts = {'benign': 0, 'malignant': 0, 'normal': 0}
-
-    print(f"🕒 Augmentation started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📂 Input directory: {input_dir}")
-    print(f"📂 Output directory: {output_dir}")
-
-    # Process each class folder
     for label in ['benign', 'malignant', 'normal']:
         input_folder = os.path.join(input_dir, label)
         output_folder = os.path.join(output_dir, label)
+        os.makedirs(output_folder, exist_ok=True)
 
         if not os.path.exists(input_folder):
-            print(f"Warning: Folder {input_folder} does not exist.")
+            print(f"Warning: Input folder {input_folder} does not exist.")
             continue
 
-        image_files = [f for f in os.listdir(input_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        print(f"📷 Processing {len(image_files)} images in {label}...")
+        for file in os.listdir(input_folder):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                # Load original image
+                img_path = os.path.join(input_folder, file)
+                img = Image.open(img_path).convert('L')
 
-        for image_file in tqdm(image_files, desc=f"Augmenting {label}"):
-            image_path = os.path.join(input_folder, image_file)
-            try:
-                image = Image.open(image_path).convert('L')
-            except Exception as e:
-                print(f"Error loading {image_path}: {e}")
-                continue
+                # Save original image
+                original_output_path = os.path.join(output_folder, file)
+                img.save(original_output_path)
 
-            # Save original image
-            original_save_path = os.path.join(output_folder, image_file)
-            image.save(original_save_path)
-            class_counts[label] += 1
-            total_images += 1
+                # Define augmentation transforms
+                augmentations = [
+                    transforms.RandomHorizontalFlip(p=1.0),
+                    transforms.RandomRotation(degrees=15),
+                    transforms.RandomResizedCrop(size=img.size, scale=(0.8, 1.0), ratio=(0.75, 1.33)),
+                    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+                    transforms.ColorJitter(brightness=0.2, contrast=0.2)
+                ]
 
-            # Generate and save augmented images
-            base_name, ext = os.path.splitext(image_file)
-            for i in range(num_augmentations):
-                # Apply augmentations
-                augmented_image = augmentation_pipeline(image)
-                # Convert back to PIL Image for saving
-                if isinstance(augmented_image, torch.Tensor):
-                    augmented_image = transforms.ToPILImage()(augmented_image)
-                # Save augmented image
-                aug_save_path = os.path.join(output_folder, f"{base_name}_aug_{i+1}{ext}")
-                augmented_image.save(aug_save_path)
-                class_counts[label] += 1
-                total_images += 1
+                # Generate augmented images
+                for i in range(num_augmentations):
+                    aug_img = img.copy()
+                    # Apply a random subset of augmentations
+                    random.shuffle(augmentations)
+                    for aug in augmentations[:random.randint(1, len(augmentations))]:
+                        aug_img = aug(aug_img)
+                    aug_output_path = os.path.join(output_folder, f"{os.path.splitext(file)[0]}_aug_{i+1}.png")
+                    aug_img.save(aug_output_path)
 
-    print(f"✅ Augmentation complete!")
-    print(f"Total Images Generated: {total_images}")
-    print(f"Class Counts: {class_counts}")
+                print(f"Processed {file}: Saved original and {num_augmentations} augmented images to {output_folder}")
 
-def main():
+def main(num_augmentations=5):
     input_dir = "../Data_sets/BUSI/"
     output_dir = "../Data_sets/BUSI_augmented/"
-    num_augmentations = 5  # Number of augmented versions per image
-
     create_augmented_dataset(input_dir, output_dir, num_augmentations)
+    print(f"✅ Augmentation complete. Dataset saved to {output_dir}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Create augmented BUSI dataset")
+    parser.add_argument('--num_augmentations', type=int, default=5,
+                        help="Number of augmentations per image (default: 5)")
+    args = parser.parse_args()
+    main(num_augmentations=args.num_augmentations)
