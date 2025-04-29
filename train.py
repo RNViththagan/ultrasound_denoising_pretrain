@@ -7,7 +7,13 @@ from model import get_model
 from datetime import datetime
 import os
 
-def pretrain(model, train_loader, val_loader, config):
+def pretrain(model, train_loader, val_loader, config, pretrained_path=None):
+    # Load pretrained weights if provided
+    if pretrained_path and os.path.exists(pretrained_path):
+        model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
+        print(f"✅ Loaded pretrained weights from {pretrained_path}")
+    else:
+        print("⚠️ No pretrained weights provided. Starting from scratch.")
     """
     Pretrain the model using Noise2Void (masked reconstruction).
     - Input: Masked image (X * M).
@@ -190,7 +196,7 @@ def main():
     os.makedirs(config.output_dir, exist_ok=True)
 
     train_loader, val_loader, test_loader = get_dataloaders(config, mode='pretrain')
-    model = get_model(model_name="resnet", pretrained=False).to(config.device)
+    model = get_model(model_name="resnet", pretrained=True).to(config.device)
 
     pretrain(model, train_loader, val_loader, config)
 
