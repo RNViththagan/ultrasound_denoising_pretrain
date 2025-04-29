@@ -11,15 +11,6 @@ def create_augmented_dataset(input_dir, output_dir, num_augmentations=5):
     Create an augmented dataset from the BUSI dataset.
     For each image, save the original and generate augmented versions.
     """
-    # Define augmentation transforms
-    augmentations = [
-        transforms.RandomHorizontalFlip(p=1.0),
-        transforms.RandomRotation(degrees=15),
-        transforms.RandomResizedCrop(size=img.size, scale=(0.8, 1.0), ratio=(0.75, 1.33)),
-        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2)
-    ]
-
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -54,6 +45,15 @@ def create_augmented_dataset(input_dir, output_dir, num_augmentations=5):
             img.save(original_output_path)
             class_counts[label] += 1
             total_images += 1
+
+            # Define augmentation transforms
+            augmentations = [
+                transforms.RandomHorizontalFlip(p=1.0),
+                transforms.RandomRotation(degrees=15),
+                transforms.RandomResizedCrop(size=img.size, scale=(0.8, 1.0), ratio=(0.75, 1.33)),
+                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2)
+            ]
 
             # Generate augmented images
             for i in range(num_augmentations):
