@@ -1,5 +1,5 @@
 import torch
-import os
+from torchvision import transforms
 
 class Config:
     def __init__(self):
@@ -34,9 +34,13 @@ class Config:
         self.checkpoint_dir = "checkpoints/"
         self.output_dir = "./outs/"  # Updated in main.py or individual scripts
         self._timestamp = None  # Set during training
-
+        self.image_size = (256, 256)
         # Transform
-        self.transform = None  # Add transforms if needed
+        self.transform = transforms.Compose([
+            transforms.Resize(self.image_size),
+            transforms.ToTensor(),
+        ])
+
 
     def __str__(self):
         return (f"Config:\n"
