@@ -1,5 +1,6 @@
 import argparse
 import os
+import glob
 from datetime import datetime
 import augment_dataset
 from train import pretrain
@@ -10,7 +11,6 @@ from config import Config
 from dataset import get_dataloaders
 from model import get_model
 from utils import seed_everything, print_gpu_info
-
 
 def visualize_sample_images(loader, num_images=4, mode='pretrain', save_path="sample_images.png"):
     import matplotlib.pyplot as plt
@@ -92,7 +92,15 @@ def main(args):
             model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
             print(f"✅ Loaded pretrained weights from {pretrained_path}")
         else:
-            print(f"Warning: Pretrained weights not found at {pretrained_path}. Starting from scratch.")
+            # Look for the latest pretrained checkpoint
+            checkpoint_pattern = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final_*.pth")
+            checkpoint_files = glob.glob(checkpoint_pattern)
+            if checkpoint_files:
+                latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+                model.load_state_dict(torch.load(latest_checkpoint, map_location=config.device))
+                print(f"✅ Loaded latest pretrained weights from {latest_checkpoint}")
+            else:
+                print(f"Warning: No pretrained weights found in {config.checkpoint_dir}. Starting from scratch.")
         finetune(model, train_loader_finetune, val_loader_finetune, config)
         test_finetune(model, test_loader_finetune, config)
 
