@@ -16,7 +16,7 @@ class Config:
 
         # Training
         self.pretrain_epochs = 150
-        self.finetune_epochs = 70
+        self.finetune_epochs = 100
         self.pretrain_lr = 1e-4
         self.finetune_lr = 1e-5
 
