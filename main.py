@@ -1,6 +1,7 @@
 import argparse
 import os
 import glob
+import torch
 from datetime import datetime
 import augment_dataset
 from train import pretrain
@@ -20,9 +21,9 @@ def visualize_sample_images(loader, num_images=4, mode='pretrain', save_path="sa
         titles = ["Masked Input", "Original", "Mask"]
         images = [masked_images, original_images, masks]
     else:
-        doubly_noisy, singly_noisy = sample_batch[:num_images]
-        titles = ["Doubly-Noisy", "Singly-Noisy"]
-        images = [doubly_noisy, singly_noisy]
+        doubly_noisy, pseudo_clean = sample_batch[:num_images]
+        titles = ["Doubly-Noisy", "Pseudo-Clean"]
+        images = [doubly_noisy, pseudo_clean]
 
     # Denormalize
     images = [img * 0.5 + 0.5 for img in images]
