@@ -1,6 +1,5 @@
 import torch
-from torchvision import transforms
-import os
+import torchvision.transforms as transforms
 
 class Config:
     def __init__(self):
@@ -11,6 +10,7 @@ class Config:
         self.data_dir = "../Data_sets/BUSI_augmented/"
         self.split_ratio = [0.7, 0.15, 0.15]  # train/val/test
         self.batch_size = 8
+        self.image_size = (256, 256)
 
         # Model
         self.model_name = "resnet"
@@ -35,13 +35,12 @@ class Config:
         self.checkpoint_dir = "checkpoints/"
         self.output_dir = "./outs/"  # Updated in main.py or individual scripts
         self._timestamp = None  # Set during training
-        self.image_size = (256, 256)
+
         # Transform
         self.transform = transforms.Compose([
             transforms.Resize(self.image_size),
             transforms.ToTensor(),
         ])
-
 
     def __str__(self):
         return (f"Config:\n"
@@ -49,6 +48,7 @@ class Config:
                 f"  Data Dir: {self.data_dir}\n"
                 f"  Split Ratio: {self.split_ratio}\n"
                 f"  Batch Size: {self.batch_size}\n"
+                f"  Image Size: {self.image_size}\n"
                 f"  Model: {self.model_name}\n"
                 f"  Pretrain Epochs: {self.pretrain_epochs}\n"
                 f"  Finetune Epochs: {self.finetune_epochs}\n"
