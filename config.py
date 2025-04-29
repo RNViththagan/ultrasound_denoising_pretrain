@@ -18,7 +18,7 @@ class Config:
         self.pretrain_epochs = 150
         self.finetune_epochs = 70
         self.pretrain_lr = 1e-4
-        self.finetune_lr = 5e-5
+        self.finetune_lr = 1e-5
 
         # Early Stopping
         self.early_stop_patience_pretrain = 20
