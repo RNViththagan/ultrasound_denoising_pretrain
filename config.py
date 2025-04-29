@@ -32,7 +32,7 @@ class Config:
 
         # Checkpoint and Output
         self.checkpoint_dir = "checkpoints/"
-        self.output_dir = "./outs/"  # Updated in main.py
+        self.output_dir = "./outs/"  # Updated in main.py or individual scripts
         self._timestamp = None  # Set during training
 
         # Transform

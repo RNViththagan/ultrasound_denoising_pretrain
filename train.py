@@ -103,7 +103,7 @@ def pretrain(model, train_loader, val_loader, config):
             best_model_state = model.state_dict()
             patience_counter = 0
             # Save best model
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             best_filename = f"pretrained_masked_unet_best_{timestamp}.pth"
             save_checkpoint(model, config.checkpoint_dir, best_filename)
             print(f"✅ Saved best model (Epoch {epoch+1}, {config.early_stop_metric}: {best_metric:.4f}) to {best_filename}")
@@ -116,20 +116,20 @@ def pretrain(model, train_loader, val_loader, config):
 
         # Save checkpoint every 10 epochs
         if (epoch + 1) % 10 == 0:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"pretrained_masked_unet_epoch{epoch+1}_{timestamp}.pth"
             save_checkpoint(model, config.checkpoint_dir, filename)
 
     # Save final model with best weights
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        final_filename = f"pretrained_masked_unet_final_{config._timestamp}.pth"
+        timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        final_filename = f"pretrained_masked_unet_final_{timestamp}.pth"
         save_checkpoint(model, config.checkpoint_dir, final_filename)
         print(f"✅ Restored best weights and saved final model to {final_filename}")
     else:
-        config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        final_filename = f"pretrained_masked_unet_final_{config._timestamp}.pth"
+        timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        final_filename = f"pretrained_masked_unet_final_{timestamp}.pth"
         save_checkpoint(model, config.checkpoint_dir, final_filename)
 
     # Plotting
@@ -182,8 +182,11 @@ def main():
     seed_everything(42)
 
     config = Config()
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    config.output_dir = os.path.join("./outs", timestamp)
+    # Create timestamped output directory for standalone execution
+    if not config._timestamp:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        config.output_dir = os.path.join("./outs", timestamp)
+        config._timestamp = timestamp
     os.makedirs(config.output_dir, exist_ok=True)
 
     train_loader, val_loader, test_loader = get_dataloaders(config, mode='pretrain')

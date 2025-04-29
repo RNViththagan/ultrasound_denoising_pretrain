@@ -36,10 +36,11 @@ def main():
     else:
         print(f"✅ Using existing augmented dataset at {augmented_dir}")
 
-    # Create timestamped output directory
+    # Create single timestamped output directory for all tasks
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     config.output_dir = os.path.join("./outs", timestamp)
     os.makedirs(config.output_dir, exist_ok=True)
+    config._timestamp = timestamp  # Store for checkpoint naming
 
     # Get data loaders
     train_loader_pretrain, val_loader_pretrain, test_loader_pretrain = get_dataloaders(config, mode='pretrain')
@@ -55,7 +56,7 @@ def main():
 
     if args.mode in ['finetune', 'both']:
         print("🚀 Starting fine-tuning...")
-        pretrained_path = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final.pth")
+        pretrained_path = os.path.join(config.checkpoint_dir, f"pretrained_masked_unet_final_{timestamp}.pth")
         if os.path.exists(pretrained_path):
             model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
             print(f"✅ Loaded pretrained weights from {pretrained_path}")

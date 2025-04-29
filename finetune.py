@@ -99,7 +99,7 @@ def finetune(model, train_loader, val_loader, config):
             best_model_state = model.state_dict()
             patience_counter = 0
             # Save best model
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             best_filename = f"finetuned_resnet_noise{config.noise_std}_best_{timestamp}.pth"
             save_checkpoint(model, config.checkpoint_dir, best_filename)
             print(f"✅ Saved best model (Epoch {epoch+1}, {config.early_stop_metric}: {best_metric:.4f}) to {best_filename}")
@@ -112,20 +112,20 @@ def finetune(model, train_loader, val_loader, config):
 
         # Save checkpoint every 10 epochs
         if (epoch + 1) % 10 == 0:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"finetuned_resnet_noise{config.noise_std}_epoch{epoch+1}_{timestamp}.pth"
             save_checkpoint(model, config.checkpoint_dir, filename)
 
     # Save final model with best weights
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{config._timestamp}.pth"
+        timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{timestamp}.pth"
         save_checkpoint(model, config.checkpoint_dir, final_filename)
         print(f"✅ Restored best weights and saved final model to {final_filename}")
     else:
-        config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{config._timestamp}.pth"
+        timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{timestamp}.pth"
         save_checkpoint(model, config.checkpoint_dir, final_filename)
 
     # Plotting
@@ -135,7 +135,6 @@ def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, train_ssims, 
     epochs = range(1, len(train_losses)+1)
     plt.figure(figsize=(18, 5))
 
-    # Loss Plot
     plt.subplot(1, 3, 1)
     plt.plot(epochs, train_losses, label="Train Loss", marker='o')
     plt.plot(epochs, val_losses, label="Val Loss", marker='o')
@@ -145,7 +144,6 @@ def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, train_ssims, 
     plt.legend()
     plt.grid(True)
 
-    # PSNR Plot
     plt.subplot(1, 3, 2)
     plt.plot(epochs, train_psnrs, label="Train PSNR", marker='o')
     plt.plot(epochs, val_psnrs, label="Val PSNR", marker='o')
@@ -155,7 +153,6 @@ def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, train_ssims, 
     plt.legend()
     plt.grid(True)
 
-    # SSIM Plot
     plt.subplot(1, 3, 3)
     plt.plot(epochs, train_ssims, label="Train SSIM", marker='o')
     plt.plot(epochs, val_ssims, label="Val SSIM", marker='o')
@@ -181,15 +178,22 @@ def main():
     seed_everything(42)
 
     config = Config()
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    config.output_dir = os.path.join("./outs", timestamp)
+    # Create timestamped output directory for standalone execution
+    if not config._timestamp:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        config.output_dir = os.path.join("./outs", timestamp)
+        config._timestamp = timestamp
     os.makedirs(config.output_dir, exist_ok=True)
 
     train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
     model = get_model(model_name="resnet", pretrained=False).to(config.device)
     pretrained_path = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final.pth")
-    model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
-    print(f"✅ Loaded pretrained weights from {pretrained_path}")
+    if os.path.exists(pretrained_path):
+        model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
+        print(f"✅ Loaded pretrained weights from {pretrained_path}")
+    else:
+        print(f"Warning: Pretrained weights not found at {pretrained_path}. Starting from scratch.")
+        pretrained_path = None
 
     finetune(model, train_loader, val_loader, config)
 
