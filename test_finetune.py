@@ -5,6 +5,7 @@ from utils import calculate_psnr, calculate_ssim
 from model import get_model
 from datetime import datetime
 import os
+import glob
 """
 Explanation of Outputs and Images
 ================================
@@ -161,12 +162,15 @@ def main():
     _, _, test_loader = get_dataloaders(config, mode='finetune')
     model = get_model(model_name="resnet", pretrained=False).to(config.device)
 
-    checkpoint_path = os.path.join(config.checkpoint_dir, f"finetuned_resnet_noise{config.noise_std}_final.pth")
-    if os.path.exists(checkpoint_path):
+    # Look for the latest finetuned checkpoint
+    checkpoint_pattern = os.path.join(config.checkpoint_dir, f"finetuned_resnet_noise{config.noise_std}_final_*.pth")
+    checkpoint_files = glob.glob(checkpoint_pattern)
+    if checkpoint_files:
+        checkpoint_path = max(checkpoint_files, key=os.path.getmtime)
         model.load_state_dict(torch.load(checkpoint_path, map_location=config.device))
         print(f"✅ Loaded weights from {checkpoint_path}")
     else:
-        raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
+        raise FileNotFoundError(f"No finetuned checkpoint found for noise_std={config.noise_std} in {config.checkpoint_dir}")
 
     print(f"🧪 Testing on {len(test_loader.dataset)} test images")
     test_finetune(model, test_loader, config)
