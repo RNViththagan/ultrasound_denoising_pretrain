@@ -1,26 +1,50 @@
 import torch
-import numpy as np
+import math
 import random
-import os
+import numpy as np
+import pytorch_ssim  # For SSIM computation
+
+def print_gpu_info():
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"✅ Using GPU: {gpu_name}")
+    else:
+        print("⚠️ No GPU available. Using CPU.")
 
 def seed_everything(seed=42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-def print_gpu_info():
     if torch.cuda.is_available():
-        print(f"✅ Using GPU: {torch.cuda.get_device_name(0)}")
-        torch.backends.cudnn.benchmark = True
-    else:
-        print("❌ GPU not available. Using CPU.")
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
-def calculate_psnr(mse_loss):
-    if mse_loss == 0:
-        return float('inf')
-    return 20 * torch.log10(torch.tensor(1.0)) - 10 * torch.log10(mse_loss)
+def calculate_psnr(mse):
+    """
+    Calculate PSNR given MSE.
+    PSNR = 10 * log10(1 / MSE)
+    """
+    if mse == 0:
+        return torch.tensor(float('inf'))
+    return 10 * torch.log10(1.0 / mse)
 
-def save_checkpoint(model, path, filename):
-    os.makedirs(path, exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(path, filename))
+def calculate_ssim(img1, img2, mask=None):
+    """
+    Calculate SSIM between img1 and img2. If mask is provided, compute SSIM only on unmasked pixels.
+    img1, img2: [B, C, H, W], values in [0, 1]
+    mask: [B, C, H, W], 1 for unmasked, 0 for masked (optional)
+    Returns: Average SSIM score across batch
+    """
+    if mask is not None:
+        # Apply mask to images
+        img1 = img1 * mask
+        img2 = img2 * mask
+    ssim_value = pytorch_ssim.ssim(img1, img2, window_size=11, size_average=True)
+    return ssim_value
+
+def save_checkpoint(model, checkpoint_dir, filename):
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    save_path = os.path.join(checkpoint_dir, filename)
+    torch.save(model.state_dict(), save_path)
+    print(f"💾 Saved checkpoint to {save_path}")

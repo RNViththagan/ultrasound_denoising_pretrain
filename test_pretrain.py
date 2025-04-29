@@ -9,7 +9,7 @@ from datetime import datetime
 from config import Config
 from dataset import get_dataloaders
 from model import get_model
-from utils import calculate_psnr, print_gpu_info, seed_everything
+from utils import calculate_psnr, calculate_ssim, print_gpu_info, seed_everything
 
 def test_model(model, test_loader, config, checkpoint_path, save_dir="test_outputs_pretrain"):
     os.makedirs(save_dir, exist_ok=True)
@@ -24,6 +24,7 @@ def test_model(model, test_loader, config, checkpoint_path, save_dir="test_outpu
 
     test_loss = 0.0
     test_psnr = 0.0
+    test_ssim = 0.0
     num_batches = len(test_loader)
     input_images, output_images, original_images = [], [], []
 
@@ -33,8 +34,11 @@ def test_model(model, test_loader, config, checkpoint_path, save_dir="test_outpu
             output = model(masked_batch)
             loss = masked_mse_loss(output, original_batch, mask)
             test_loss += loss.item()
-            psnr = calculate_psnr(loss).item()
+            mse = ((output - original_batch) ** 2 * mask).sum() / mask.sum()
+            psnr = calculate_psnr(mse).item()
+            ssim = calculate_ssim(output, original_batch, mask).item()
             test_psnr += psnr
+            test_ssim += ssim
 
             if i == 0:
                 input_images = masked_batch[:4].cpu()
@@ -43,9 +47,11 @@ def test_model(model, test_loader, config, checkpoint_path, save_dir="test_outpu
 
     avg_test_loss = test_loss / num_batches
     avg_test_psnr = test_psnr / num_batches
+    avg_test_ssim = test_ssim / num_batches
     print(f"📊 Pretrained Test Results:")
     print(f"Average Test Loss: {avg_test_loss:.4f}")
     print(f"Average Test PSNR: {avg_test_psnr:.2f} dB")
+    print(f"Average Test SSIM: {avg_test_ssim:.4f}")
 
     visualize_results(input_images, output_images, original_images, save_dir)
 
