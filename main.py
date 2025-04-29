@@ -70,10 +70,9 @@ def main(args):
 
     if args.mode in ['pretrain', 'both']:
         print("\n🚀 Starting Pretraining (Noise2Void)...")
-        train_loader, val_loader, test_loader = get_dataloaders(config, mode='pretrain')
         print("📸 Visualizing sample pretrain images...")
         visualize_sample_images(
-            train_loader,
+            train_loader_pretrain,
             mode='pretrain',
             save_path=os.path.join(config.output_dir, "sample_images_pretrain.png")
         )
@@ -82,10 +81,9 @@ def main(args):
 
     if args.mode in ['finetune', 'both']:
         print("\n🚀 Starting Fine-tuning (Noisier2Noise)...")
-        train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
         print("📸 Visualizing sample finetune images...")
         visualize_sample_images(
-            train_loader,
+            train_loader_finetune,
             mode='finetune',
             save_path=os.path.join(config.output_dir, "sample_images_finetune.png")
         )
