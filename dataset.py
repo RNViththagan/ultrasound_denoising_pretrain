@@ -6,13 +6,14 @@ import numpy as np
 from torchvision import transforms
 
 class BUSIDataset(Dataset):
-    def __init__(self, root_dir, transform=None, mode='pretrain', mask_ratio=0.1, noise_std=0.1, split='train'):
+    def __init__(self, root_dir, transform=None, mode='pretrain', mask_ratio=0.1, noise_std=0.1, split='train', exclude_paths=None):
         self.root_dir = root_dir
         self.transform = transform
         self.mode = mode  # 'pretrain' (Noise2Void), 'finetune' (Noisier2Noise)
         self.mask_ratio = mask_ratio
         self.noise_std = noise_std
         self.split = split  # 'train', 'val', or 'test'
+        self.exclude_paths = exclude_paths or []  # Paths to exclude (e.g., test images for train/val)
         self.image_paths = []
         self.class_counts = {'benign': 0, 'malignant': 0, 'normal': 0}
 
@@ -23,11 +24,18 @@ class BUSIDataset(Dataset):
                 continue
             for file in os.listdir(folder):
                 if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    self.image_paths.append(os.path.join(folder, file))
+                    file_path = os.path.join(folder, file)
+                    # For test split, include only original images (exclude *_aug_*.png)
+                    if self.split == 'test' and '_aug_' in file:
+                        continue
+                    # Exclude paths used in other splits (e.g., test images from train/val)
+                    if file_path in self.exclude_paths:
+                        continue
+                    self.image_paths.append(file_path)
                     self.class_counts[label] += 1
 
         if not self.image_paths:
-            raise ValueError("No images found in the dataset directory.")
+            raise ValueError(f"No images found in the dataset directory for split={self.split}.")
 
     def __len__(self):
         return len(self.image_paths)
@@ -51,12 +59,12 @@ class BUSIDataset(Dataset):
             masked_image = image * mask
             return masked_image, image, mask
         else:
-            # Noisier2Noise: doubly-noisy input (Z = Y + Y*M), singly-noisy target (Y)
+            # Noisier2Noise: doubly-noisy input (Z = Y + Y*M), input target (Y)
             noise = torch.randn_like(image) * self.noise_std
-            singly_noisy = image  # Y (BUSI image, assumed singly-noisy)
-            doubly_noisy = singly_noisy + singly_noisy * noise  # Z = Y + Y*M
+            input = image  # Y (BUSI image, pseudo-clean)
+            doubly_noisy = input + input * noise  # Z = Y + Y*M
             doubly_noisy = torch.clamp(doubly_noisy, 0, 1)
-            return doubly_noisy, singly_noisy  # Z, Y
+            return doubly_noisy, input  # Z, Y
 
     def get_stats(self):
         return {
@@ -65,24 +73,48 @@ class BUSIDataset(Dataset):
         }
 
 def get_dataloaders(config, mode='pretrain'):
-    train_dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std, split='train')
-    val_dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std, split='val')
-    test_dataset = BUSIDataset(config.data_dir, config.transform, mode=mode, mask_ratio=0.1, noise_std=config.noise_std, split='test')
+    # Load original dataset for test (only original images)
+    original_dataset = BUSIDataset(
+        config.data_dir,
+        config.transform,
+        mode=mode,
+        mask_ratio=0.1,
+        noise_std=config.noise_std,
+        split='test'
+    )
+    original_stats = original_dataset.get_stats()
+    n_original = original_stats['total_images']  # ~780
+    n_test = int(n_original * config.split_ratio[2])  # ~117 (15% of 780)
 
-    stats = train_dataset.get_stats()
+    # Load full dataset for train/val (original + augmented)
+    full_dataset = BUSIDataset(
+        config.data_dir,
+        config.transform,
+        mode=mode,
+        mask_ratio=0.1,
+        noise_std=config.noise_std,
+        split='train',
+        exclude_paths=original_dataset.image_paths  # Exclude test images
+    )
+    full_stats = full_dataset.get_stats()
+    n_full = full_stats['total_images']  # ~4680 - n_original
+    n_train = int(n_full * config.split_ratio[0] / (config.split_ratio[0] + config.split_ratio[1]))  # ~70% of (4680 - 780)
+    n_val = n_full - n_train  # ~15% of (4680 - 780)
+
+    # Split full_dataset into train and val
+    train_set, val_set = random_split(full_dataset, [n_train, n_val])
+
+    # Split original_dataset for test
+    test_set, _ = random_split(original_dataset, [n_test, n_original - n_test])
+
     print("📊 Dataset Statistics:")
-    print(f"Total Images: {stats['total_images']}")
-    print(f"Class Counts: {stats['class_counts']}")
-
-    n_total = len(train_dataset)
-    n_train = int(n_total * config.split_ratio[0])
-    n_val = int(n_total * config.split_ratio[1])
-    n_test = n_total - n_train - n_val
-
-    print(f"Train/Val/Test Split: {n_train}/{n_val}/{n_test} "
+    print(f"Total Images (Train): {len(train_set)}")
+    print(f"Total Images (Val): {len(val_set)}")
+    print(f"Total Images (Test): {len(test_set)}")
+    print(f"Train Class Counts: {full_stats['class_counts']}")
+    print(f"Test Class Counts: {original_stats['class_counts']}")
+    print(f"Train/Val/Test Split: {len(train_set)}/{len(val_set)}/{len(test_set)} "
           f"({config.split_ratio[0]*100:.1f}%/{config.split_ratio[1]*100:.1f}%/{config.split_ratio[2]*100:.1f}%)")
-
-    train_set, val_set, test_set = random_split(train_dataset, [n_train, n_val, n_test])
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False, num_workers=0)
@@ -92,6 +124,6 @@ def get_dataloaders(config, mode='pretrain'):
     if mode == 'pretrain':
         print(f"Sample Batch Shapes: Masked={sample_batch[0].shape}, Original={sample_batch[1].shape}, Mask={sample_batch[2].shape}")
     else:
-        print(f"Sample Batch Shapes: Doubly-Noisy={sample_batch[0].shape}, Singly-Noisy={sample_batch[1].shape}")
+        print(f"Sample Batch Shapes: Doubly-Noisy={sample_batch[0].shape}, Input={sample_batch[1].shape}")
 
     return train_loader, val_loader, test_loader
