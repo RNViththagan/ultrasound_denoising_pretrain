@@ -21,6 +21,14 @@ def finetune(model, train_loader, val_loader, config):
     train_psnrs, val_psnrs = [], []
     train_ssims, val_ssims = [], []
 
+    # Early stopping
+    best_metric = float('-inf') if config.early_stop_metric != "loss" else float('inf')
+    best_model_state = None
+    patience_counter = 0
+    patience = config.early_stop_patience_finetune
+    min_delta = config.early_stop_min_delta
+    maximize = config.early_stop_metric != "loss"  # Maximize SSIM/PSNR, minimize loss
+
     for epoch in range(config.finetune_epochs):
         model.train()
         running_loss = 0
@@ -78,16 +86,47 @@ def finetune(model, train_loader, val_loader, config):
 
         print(f"📊 Epoch {epoch+1}/{config.finetune_epochs} | Train Loss: {avg_train_loss:.4f} | PSNR: {avg_train_psnr:.2f} | SSIM: {avg_train_ssim:.4f} | Val Loss: {avg_val_loss:.4f} | Val PSNR: {avg_val_psnr:.2f} | Val SSIM: {avg_val_ssim:.4f}")
 
+        # Early stopping
+        current_metric = {
+            "ssim": avg_val_ssim,
+            "psnr": avg_val_psnr,
+            "loss": avg_val_loss
+        }[config.early_stop_metric]
+
+        improved = (current_metric > best_metric + min_delta) if maximize else (current_metric < best_metric - min_delta)
+        if improved:
+            best_metric = current_metric
+            best_model_state = model.state_dict()
+            patience_counter = 0
+            # Save best model
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            best_filename = f"finetuned_resnet_noise{config.noise_std}_best_{timestamp}.pth"
+            save_checkpoint(model, config.checkpoint_dir, best_filename)
+            print(f"✅ Saved best model (Epoch {epoch+1}, {config.early_stop_metric}: {best_metric:.4f}) to {best_filename}")
+        else:
+            patience_counter += 1
+
+        if patience_counter >= patience:
+            print(f"🛑 Early stopping triggered after {patience_counter} epochs without improvement in {config.early_stop_metric}.")
+            break
+
         # Save checkpoint every 10 epochs
         if (epoch + 1) % 10 == 0:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"finetuned_resnet_noise{config.noise_std}_epoch{epoch+1}_{timestamp}.pth"
             save_checkpoint(model, config.checkpoint_dir, filename)
 
-    # Save final fine-tuned model
-    config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{config._timestamp}.pth"
-    save_checkpoint(model, config.checkpoint_dir, final_filename)
+    # Save final model with best weights
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{config._timestamp}.pth"
+        save_checkpoint(model, config.checkpoint_dir, final_filename)
+        print(f"✅ Restored best weights and saved final model to {final_filename}")
+    else:
+        config._timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        final_filename = f"finetuned_resnet_noise{config.noise_std}_final_{config._timestamp}.pth"
+        save_checkpoint(model, config.checkpoint_dir, final_filename)
 
     # Plotting
     plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, train_ssims, val_ssims, config.noise_std, config.output_dir)
@@ -141,15 +180,12 @@ def main():
     print_gpu_info()
     seed_everything(42)
 
-    # Create timestamped output directory
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    output_dir = os.path.join("./outs", timestamp)
-    os.makedirs(output_dir, exist_ok=True)
-
     config = Config()
-    config.output_dir = output_dir  # Store output_dir in config for plot_metrics
-    train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    config.output_dir = os.path.join("./outs", timestamp)
+    os.makedirs(config.output_dir, exist_ok=True)
 
+    train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
     model = get_model(model_name="resnet", pretrained=False).to(config.device)
     pretrained_path = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final.pth")
     model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
