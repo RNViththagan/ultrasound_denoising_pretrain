@@ -66,44 +66,59 @@ def main(args):
     train_loader_pretrain, val_loader_pretrain, test_loader_pretrain = get_dataloaders(config, mode='pretrain')
     train_loader_finetune, val_loader_finetune, test_loader_finetune = get_dataloaders(config, mode='finetune')
 
-    # Initialize model
+    # Initialize model with ImageNet weights
     model = get_model(model_name="resnet", pretrained=True).to(config.device)
 
-    if args.mode in ['pretrain', 'both']:
-        print("\n🚀 Starting Pretraining (Noise2Void)...")
-        print("📸 Visualizing sample pretrain images...")
-        visualize_sample_images(
-            train_loader_pretrain,
-            mode='pretrain',
-            save_path=os.path.join(config.output_dir, "sample_images_pretrain.png")
-        )
-        pretrain(model, train_loader_pretrain, val_loader_pretrain, config)
-        test_pretrain(model, test_loader_pretrain, config)
+    if args.skip_pretrain:
+        if args.mode in ['pretrain', 'both']:
+            print("⚠️ Warning: --skip_pretrain is set, skipping pretraining despite mode including pretrain.")
+        if args.mode in ['finetune', 'both']:
+            print("\n🚀 Starting Fine-tuning (Noisier2Noise) with ImageNet weights...")
+            print("📸 Visualizing sample finetune images...")
+            visualize_sample_images(
+                train_loader_finetune,
+                mode='finetune',
+                save_path=os.path.join(config.output_dir, "sample_images_finetune.png")
+            )
+            finetune(model, train_loader_finetune, val_loader_finetune, config, skip_pretrain=True)
+            test_finetune(model, test_loader_finetune, config)
+    else:
+        if args.mode in ['pretrain', 'both']:
+            print("\n🚀 Starting Pretraining (Noise2Void)...")
+            print("📸 Visualizing sample pretrain images...")
+            visualize_sample_images(
+                train_loader_pretrain,
+                mode='pretrain',
+                save_path=os.path.join(config.output_dir, "sample_images_pretrain.png")
+            )
+            pretrain(model, train_loader_pretrain, val_loader_pretrain, config)
+            test_pretrain(model, test_loader_pretrain, config)
 
-    if args.mode in ['finetune', 'both']:
-        print("\n🚀 Starting Fine-tuning (Noisier2Noise)...")
-        print("📸 Visualizing sample finetune images...")
-        visualize_sample_images(
-            train_loader_finetune,
-            mode='finetune',
-            save_path=os.path.join(config.output_dir, "sample_images_finetune.png")
-        )
-        pretrained_path = os.path.join(config.checkpoint_dir, f"pretrained_masked_unet_final_{timestamp}.pth")
-        if os.path.exists(pretrained_path):
-            model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
-            print(f"✅ Loaded pretrained weights from {pretrained_path}")
-        else:
-            # Look for the latest pretrained checkpoint
-            checkpoint_pattern = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final_*.pth")
-            checkpoint_files = glob.glob(checkpoint_pattern)
-            if checkpoint_files:
-                latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
-                model.load_state_dict(torch.load(latest_checkpoint, map_location=config.device))
-                print(f"✅ Loaded latest pretrained weights from {latest_checkpoint}")
+        if args.mode in ['finetune', 'both']:
+            print("\n🚀 Starting Fine-tuning (Noisier2Noise)...")
+            print("📸 Visualizing sample finetune images...")
+            visualize_sample_images(
+                train_loader_finetune,
+                mode='finetune',
+                save_path=os.path.join(config.output_dir, "sample_images_finetune.png")
+            )
+            pretrained_path = os.path.join(config.checkpoint_dir, f"pretrained_masked_unet_final_{timestamp}.pth")
+            if os.path.exists(pretrained_path):
+                model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
+                print(f"✅ Loaded pretrained weights from {pretrained_path}")
             else:
-                print(f"Warning: No pretrained weights found in {config.checkpoint_dir}. Starting from scratch.")
-        finetune(model, train_loader_finetune, val_loader_finetune, config)
-        test_finetune(model, test_loader_finetune, config)
+                # Look for the latest pretrained checkpoint
+                checkpoint_pattern = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final_*.pth")
+                checkpoint_files = glob.glob(checkpoint_pattern)
+                if checkpoint_files:
+                    latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+                    model.load_state_dict(torch.load(latest_checkpoint, map_location=config.device))
+                    print(f"✅ Loaded latest pretrained weights from {latest_checkpoint}")
+                else:
+                    print(f"Warning: No pretrained weights found in {config.checkpoint_dir}. Using ImageNet weights.")
+                    # Already initialized with ImageNet weights
+            finetune(model, train_loader_finetune, val_loader_finetune, config, skip_pretrain=False)
+            test_finetune(model, test_loader_finetune, config)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ultrasound Image Denoising Pipeline")
@@ -113,5 +128,7 @@ if __name__ == "__main__":
                         help="Run augmentation before training (default: use existing augmented dataset)")
     parser.add_argument('--num_augmentations', type=int, default=5,
                         help="Number of augmentations per image (default: 5)")
+    parser.add_argument('--skip_pretrain', action='store_true',
+                        help="Skip pretraining and fine-tune directly with ImageNet weights")
     args = parser.parse_args()
     main(args)

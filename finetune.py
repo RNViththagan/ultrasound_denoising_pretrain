@@ -7,12 +7,14 @@ from model import get_model
 from datetime import datetime
 import os
 
-def finetune(model, train_loader, val_loader, config):
+def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
     """
     Fine-tune the model for Noisier2Noise denoising.
     - Input: Z (doubly-noisy, Y + Y*M).
     - Target: Y (input, pseudo-clean, BUSI images).
     - Goal: Learn f(Z) ≈ Y.
+    - Args:
+        skip_pretrain (bool): If True, fine-tune with ImageNet weights, skipping Noise2Void pretrained weights.
     """
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.finetune_lr)
@@ -28,6 +30,10 @@ def finetune(model, train_loader, val_loader, config):
     patience = config.early_stop_patience_finetune
     min_delta = config.early_stop_min_delta
     maximize = config.early_stop_metric != "loss"  # Maximize SSIM/PSNR, minimize loss
+
+    # Log initialization
+    init_type = "ImageNet pretrained" if skip_pretrain else "Noise2Void pretrained"
+    print(f"🟢 Starting fine-tuning with {init_type} weights.")
 
     for epoch in range(config.finetune_epochs):
         model.train()
@@ -186,16 +192,8 @@ def main():
     os.makedirs(config.output_dir, exist_ok=True)
 
     train_loader, val_loader, test_loader = get_dataloaders(config, mode='finetune')
-    model = get_model(model_name="resnet", pretrained=False).to(config.device)
-    pretrained_path = os.path.join(config.checkpoint_dir, "pretrained_masked_unet_final.pth")
-    if os.path.exists(pretrained_path):
-        model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
-        print(f"✅ Loaded pretrained weights from {pretrained_path}")
-    else:
-        print(f"Warning: Pretrained weights not found at {pretrained_path}. Starting from scratch.")
-        pretrained_path = None
-
-    finetune(model, train_loader, val_loader, config)
+    model = get_model(model_name="resnet", pretrained=True).to(config.device)
+    finetune(model, train_loader, val_loader, config, skip_pretrain=True)
 
 if __name__ == "__main__":
     main()
