@@ -11,6 +11,7 @@ class Config:
         self.split_ratio = [0.7, 0.15, 0.15]  # train/val/test
         self.batch_size = 8
         self.image_size = (256, 256)
+        self.num_samples = 4  # Number of sample images to visualize in testing
 
         # Model
         self.model_name = "resnet"
@@ -49,6 +50,7 @@ class Config:
                 f"  Split Ratio: {self.split_ratio}\n"
                 f"  Batch Size: {self.batch_size}\n"
                 f"  Image Size: {self.image_size}\n"
+                f"  Num Samples: {self.num_samples}\n"
                 f"  Model: {self.model_name}\n"
                 f"  Pretrain Epochs: {self.pretrain_epochs}\n"
                 f"  Finetune Epochs: {self.finetune_epochs}\n"
