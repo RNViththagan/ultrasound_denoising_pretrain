@@ -1,5 +1,4 @@
 import torch
-import torchvision.transforms as transforms
 
 class Config:
     def __init__(self):
@@ -7,14 +6,16 @@ class Config:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Dataset
-        self.data_dir = "../Data_sets/BUSI_augmented/"
-        self.split_ratio = [0.7, 0.15, 0.15]  # train/val/test
+        self.dataset_name = "BUSI"  # Options: "BUSI", "HC18"
+        self.data_dir = f"../Data_sets/{self.dataset_name}/"  # BUSI or HC18 root
+        self.split_ratio = [0.7, 0.0, 0.3]  # train/val/test (no validation)
         self.batch_size = 8
         self.image_size = (256, 256)
-        self.num_samples = 4  # Number of sample images to visualize in testing
+        self.num_samples = 4  # Number of sample images to visualize
 
         # Model
-        self.model_name = "resnet"
+        self.model_name = "unet"
+        self.pretrained_path = None  # Set in main.py for finetune_pretrained
 
         # Training
         self.pretrain_epochs = 150
@@ -22,11 +23,11 @@ class Config:
         self.pretrain_lr = 1e-4
         self.finetune_lr = 1e-5
 
-        # Early Stopping
-        self.early_stop_patience_pretrain = 20
-        self.early_stop_patience_finetune = 15
-        self.early_stop_min_delta = 0.001
-        self.early_stop_metric = "ssim"  # Options: "ssim", "psnr", "loss"
+        # Early Stopping (disabled)
+        self.early_stop_patience_pretrain = None
+        self.early_stop_patience_finetune = None
+        self.early_stop_min_delta = 0.0
+        self.early_stop_metric = None
 
         # Noise/Mask Parameters
         self.noise_std = 0.1
@@ -34,32 +35,27 @@ class Config:
 
         # Checkpoint and Output
         self.checkpoint_dir = "checkpoints/"
-        self.output_dir = "./outs/"  # Updated in main.py or individual scripts
+        self.output_dir = "./outs/"  # Updated in main.py
         self._timestamp = None  # Set during training
 
-        # Transform
-        self.transform = transforms.Compose([
-            transforms.Resize(self.image_size),
-            transforms.ToTensor(),
-        ])
+        # Transform (handled in dataset.py)
+        self.transform = None
 
     def __str__(self):
         return (f"Config:\n"
                 f"  Device: {self.device}\n"
+                f"  Dataset: {self.dataset_name}\n"
                 f"  Data Dir: {self.data_dir}\n"
                 f"  Split Ratio: {self.split_ratio}\n"
                 f"  Batch Size: {self.batch_size}\n"
                 f"  Image Size: {self.image_size}\n"
                 f"  Num Samples: {self.num_samples}\n"
                 f"  Model: {self.model_name}\n"
+                f"  Pretrained Path: {self.pretrained_path}\n"
                 f"  Pretrain Epochs: {self.pretrain_epochs}\n"
                 f"  Finetune Epochs: {self.finetune_epochs}\n"
                 f"  Pretrain LR: {self.pretrain_lr}\n"
                 f"  Finetune LR: {self.finetune_lr}\n"
-                f"  Early Stop Patience (Pretrain): {self.early_stop_patience_pretrain}\n"
-                f"  Early Stop Patience (Finetune): {self.early_stop_patience_finetune}\n"
-                f"  Early Stop Min Delta: {self.early_stop_min_delta}\n"
-                f"  Early Stop Metric: {self.early_stop_metric}\n"
                 f"  Noise Std: {self.noise_std}\n"
                 f"  Mask Ratio: {self.mask_ratio}\n"
                 f"  Checkpoint Dir: {self.checkpoint_dir}\n"

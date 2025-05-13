@@ -1,50 +1,44 @@
 import torch
-import math
 import random
 import numpy as np
-import pytorch_ssim  # For SSIM computation
 import os
-def print_gpu_info():
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        print(f"✅ Using GPU: {gpu_name}")
-    else:
-        print("⚠️ No GPU available. Using CPU.")
+from pytorch_ssim import SSIM
+import math
 
-def seed_everything(seed=42):
+def seed_everything(seed):
+    """Set random seeds for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-def calculate_psnr(mse):
-    """
-    Calculate PSNR given MSE.
-    PSNR = 10 * log10(1 / MSE)
-    """
+def calculate_psnr(loss):
+    """Calculate PSNR from MSE loss."""
+    mse = loss
     if mse == 0:
         return torch.tensor(float('inf'))
     return 10 * torch.log10(1.0 / mse)
 
-def calculate_ssim(img1, img2, mask=None):
-    """
-    Calculate SSIM between img1 and img2. If mask is provided, compute SSIM only on unmasked pixels.
-    img1, img2: [B, C, H, W], values in [0, 1]
-    mask: [B, C, H, W], 1 for unmasked, 0 for masked (optional)
-    Returns: Average SSIM score across batch
-    """
-    if mask is not None:
-        # Apply mask to images
-        img1 = img1 * mask
-        img2 = img2 * mask
-    ssim_value = pytorch_ssim.ssim(img1, img2, window_size=11, size_average=True)
-    return ssim_value
+def calculate_ssim(pred, target):
+    """Calculate SSIM between predicted and target images."""
+    ssim = SSIM(window_size=11, size_average=True)
+    return ssim(pred, target)
 
 def save_checkpoint(model, checkpoint_dir, filename):
+    """Save model checkpoint."""
     os.makedirs(checkpoint_dir, exist_ok=True)
-    save_path = os.path.join(checkpoint_dir, filename)
-    torch.save(model.state_dict(), save_path)
-    print(f"💾 Saved checkpoint to {save_path}")
+    checkpoint_path = os.path.join(checkpoint_dir, filename)
+    torch.save(model.state_dict(), checkpoint_path)
+    print(f"✅ Checkpoint saved to {checkpoint_path}")
+
+def print_gpu_info():
+    """Print GPU information if available."""
+    if torch.cuda.is_available():
+        print(f"🔥 Using GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory Allocated: {torch.cuda.memory_allocated(0)/1024**3:.2f} GB")
+        print(f"GPU Memory Cached: {torch.cuda.memory_reserved(0)/1024**3:.2f} GB")
+    else:
+        print("🖥️ Using CPU")

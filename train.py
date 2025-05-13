@@ -7,33 +7,31 @@ from model import get_model
 from datetime import datetime
 import os
 
-def pretrain(model, train_loader, val_loader, config, pretrained_path=None):
-    # Load pretrained weights if provided
-    if pretrained_path and os.path.exists(pretrained_path):
-        model.load_state_dict(torch.load(pretrained_path, map_location=config.device))
-        print(f"✅ Loaded pretrained weights from {pretrained_path}")
-    else:
-        print("⚠️ No pretrained weights provided. Starting from scratch.")
+def pretrain(model, train_loader, val_loader, config):
     """
-    Pretrain the model using Noise2Void (masked reconstruction).
-    - Input: Masked image (X * M).
-    - Target: Original image (X), loss computed on unmasked pixels.
-    - Goal: Learn f(X * M) ≈ X.
+    Pretrain the MedSeg U-Net using Noise2Void (N2V) for self-supervised masked image reconstruction.
+
+    Description:
+    - Inputs: Masked images (X * M, where M is a binary mask with 10% pixels set to 0).
+    - Targets: Original images (X), with loss computed only on unmasked pixels.
+    - Objective: Minimize MSE loss on unmasked pixels to reconstruct the original image.
+    - Outputs:
+      - Trained model checkpoints saved in checkpoints/ (every 10 epochs and final).
+      - Sample flow visualization for one test image (masked, reconstructed, original).
+      - Metrics plots (loss, PSNR, SSIM vs. epochs) saved in outs/<timestamp>/.
+      - Console output: Per-epoch training metrics (loss, PSNR, SSIM).
+    - Notes:
+      - Uses random initial weights (no pretrained weights).
+      - No validation (70/30 train/test split).
+      - Sample image is tracked to show reconstruction quality.
     """
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.pretrain_lr)
 
-    train_losses, val_losses = [], []
-    train_psnrs, val_psnrs = [], []
-    train_ssims, val_ssims = [], []
+    train_losses, train_psnrs, train_ssims = [], [], []
+    sample_flow = None
 
-    # Early stopping
-    best_metric = float('-inf') if config.early_stop_metric != "loss" else float('inf')
-    best_model_state = None
-    patience_counter = 0
-    patience = config.early_stop_patience_pretrain
-    min_delta = config.early_stop_min_delta
-    maximize = config.early_stop_metric != "loss"  # Maximize SSIM/PSNR, minimize loss
+    print("🟢 Starting pretraining with random initial weights (Noise2Void).")
 
     for epoch in range(config.pretrain_epochs):
         model.train()
@@ -42,13 +40,13 @@ def pretrain(model, train_loader, val_loader, config, pretrained_path=None):
         running_ssim = 0
 
         loop = tqdm(train_loader, desc=f"[Pretrain Epoch {epoch+1}/{config.pretrain_epochs}]")
-        for masked_image, original_image, mask in loop:
+        for masked_image, original_image, mask, img_path in loop:
             masked_image = masked_image.to(config.device)
             original_image = original_image.to(config.device)
             mask = mask.to(config.device)
 
-            output = model(masked_image)  # f(X * M)
-            loss = loss_fn(output * mask, original_image * mask)  # MSE on unmasked pixels
+            output = model(masked_image)
+            loss = loss_fn(output * mask, original_image * mask)
 
             optimizer.zero_grad()
             loss.backward()
@@ -62,121 +60,93 @@ def pretrain(model, train_loader, val_loader, config, pretrained_path=None):
 
             loop.set_postfix(loss=loss.item(), psnr=psnr, ssim=ssim)
 
+            # Capture sample flow for the tracked image
+            if sample_flow is None and config.data_dir in img_path:
+                sample_flow = (masked_image[0], output[0], original_image[0])
+
         avg_train_loss = running_loss / len(train_loader)
         avg_train_psnr = running_psnr / len(train_loader)
         avg_train_ssim = running_ssim / len(train_loader)
 
-        # Validation
-        model.eval()
-        val_loss = 0
-        val_psnr = 0
-        val_ssim = 0
-        with torch.no_grad():
-            for masked_image, original_image, mask in val_loader:
-                masked_image = masked_image.to(config.device)
-                original_image = original_image.to(config.device)
-                mask = mask.to(config.device)
-                val_output = model(masked_image)
-                v_loss = loss_fn(val_output * mask, original_image * mask)
-                val_loss += v_loss.item()
-                val_psnr += calculate_psnr(v_loss).item()
-                val_ssim += calculate_ssim(val_output * mask, original_image * mask).item()
-
-        avg_val_loss = val_loss / len(val_loader)
-        avg_val_psnr = val_psnr / len(val_loader)
-        avg_val_ssim = val_ssim / len(val_loader)
-
-        # Logging
         train_losses.append(avg_train_loss)
-        val_losses.append(avg_val_loss)
         train_psnrs.append(avg_train_psnr)
-        val_psnrs.append(avg_val_psnr)
         train_ssims.append(avg_train_ssim)
-        val_ssims.append(avg_val_ssim)
 
-        print(f"📊 Epoch {epoch+1}/{config.pretrain_epochs} | Train Loss: {avg_train_loss:.4f} | PSNR: {avg_train_psnr:.2f} | SSIM: {avg_train_ssim:.4f} | Val Loss: {avg_val_loss:.4f} | Val PSNR: {avg_val_psnr:.2f} | Val SSIM: {avg_val_ssim:.4f}")
-
-        # Early stopping
-        current_metric = {
-            "ssim": avg_val_ssim,
-            "psnr": avg_val_psnr,
-            "loss": avg_val_loss
-        }[config.early_stop_metric]
-
-        improved = (current_metric > best_metric + min_delta) if maximize else (current_metric < best_metric - min_delta)
-        if improved:
-            best_metric = current_metric
-            best_model_state = model.state_dict()
-            patience_counter = 0
-            # Save best model
-            timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            best_filename = f"pretrained_masked_unet_best_{timestamp}.pth"
-            save_checkpoint(model, config.checkpoint_dir, best_filename)
-            print(f"✅ Saved best model (Epoch {epoch+1}, {config.early_stop_metric}: {best_metric:.4f}) to {best_filename}")
-        else:
-            patience_counter += 1
-
-        if patience_counter >= patience:
-            print(f"🛑 Early stopping triggered after {patience_counter} epochs without improvement in {config.early_stop_metric}.")
-            break
+        print(f"📊 Epoch {epoch+1}/{config.pretrain_epochs} | "
+              f"Train Loss: {avg_train_loss:.4f} | PSNR: {avg_train_psnr:.2f} | SSIM: {avg_train_ssim:.4f}")
 
         # Save checkpoint every 10 epochs
         if (epoch + 1) % 10 == 0:
             timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            filename = f"pretrained_masked_unet_epoch{epoch+1}_{timestamp}.pth"
+            filename = f"pretrained_unet_epoch{epoch+1}_{timestamp}.pth"
             save_checkpoint(model, config.checkpoint_dir, filename)
 
-    # Save final model with best weights
-    if best_model_state is not None:
-        model.load_state_dict(best_model_state)
-        timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        final_filename = f"pretrained_masked_unet_final_{timestamp}.pth"
-        save_checkpoint(model, config.checkpoint_dir, final_filename)
-        print(f"✅ Restored best weights and saved final model to {final_filename}")
-    else:
-        timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        final_filename = f"pretrained_masked_unet_final_{timestamp}.pth"
-        save_checkpoint(model, config.checkpoint_dir, final_filename)
+    # Save final model
+    timestamp = config._timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    final_filename = f"pretrained_unet_final_{timestamp}.pth"
+    save_checkpoint(model, config.checkpoint_dir, final_filename)
+    print(f"✅ Saved final pretrained model to {final_filename}")
 
-    # Plotting
-    plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, train_ssims, val_ssims, config.output_dir)
+    # Visualize sample flow
+    if sample_flow:
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 3, 1)
+        plt.imshow(sample_flow[0].cpu().squeeze(), cmap='gray')
+        plt.title("Masked Input")
+        plt.axis('off')
 
-def plot_metrics(train_losses, val_losses, train_psnrs, val_psnrs, train_ssims, val_ssims, output_dir):
-    epochs = range(1, len(train_losses)+1)
+        plt.subplot(1, 3, 2)
+        plt.imshow(sample_flow[1].cpu().squeeze(), cmap='gray')
+        plt.title("Reconstructed")
+        plt.axis('off')
+
+        plt.subplot(1, 3, 3)
+        plt.imshow(sample_flow[2].cpu().squeeze(), cmap='gray')
+        plt.title("Original")
+        plt.axis('off')
+
+        plt.tight_layout()
+        save_path = os.path.join(config.output_dir, "sample_flow_pretrain.png")
+        plt.savefig(save_path)
+        plt.show()
+        print(f"📸 Saved pretraining sample flow to {save_path}")
+
+    # Plot metrics
+    plot_metrics(train_losses, train_psnrs, train_ssims, config.output_dir, "pretrain")
+
+def plot_metrics(losses, psnrs, ssims, output_dir, phase):
+    epochs = range(1, len(losses)+1)
     plt.figure(figsize=(18, 5))
 
     plt.subplot(1, 3, 1)
-    plt.plot(epochs, train_losses, label="Train Loss", marker='o')
-    plt.plot(epochs, val_losses, label="Val Loss", marker='o')
-    plt.title("MSE Loss per Epoch")
+    plt.plot(epochs, losses, label="Train Loss", marker='o')
+    plt.title(f"MSE Loss per Epoch ({phase})")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
     plt.grid(True)
 
     plt.subplot(1, 3, 2)
-    plt.plot(epochs, train_psnrs, label="Train PSNR", marker='o')
-    plt.plot(epochs, val_psnrs, label="Val PSNR", marker='o')
-    plt.title("PSNR per Epoch")
+    plt.plot(epochs, psnrs, label="Train PSNR", marker='o')
+    plt.title(f"PSNR per Epoch ({phase})")
     plt.xlabel("Epoch")
     plt.ylabel("PSNR (dB)")
     plt.legend()
     plt.grid(True)
 
     plt.subplot(1, 3, 3)
-    plt.plot(epochs, train_ssims, label="Train SSIM", marker='o')
-    plt.plot(epochs, val_ssims, label="Val SSIM", marker='o')
-    plt.title("SSIM per Epoch")
+    plt.plot(epochs, ssims, label="Train SSIM", marker='o')
+    plt.title(f"SSIM per Epoch ({phase})")
     plt.xlabel("Epoch")
     plt.ylabel("SSIM")
     plt.legend()
     plt.grid(True)
 
     plt.tight_layout()
-    save_path = os.path.join(output_dir, "pretrain_metrics.png")
+    save_path = os.path.join(output_dir, f"{phase}_metrics.png")
     plt.savefig(save_path)
     plt.show()
-    print(f"📸 Saved metrics plot to {save_path}")
+    print(f"📸 Saved {phase} metrics plot to {save_path}")
 
 def main():
     from config import Config
@@ -188,17 +158,15 @@ def main():
     seed_everything(42)
 
     config = Config()
-    # Create timestamped output directory for standalone execution
-    if not config._timestamp:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        config.output_dir = os.path.join("./outs", timestamp)
-        config._timestamp = timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    config.output_dir = os.path.join("./outs", timestamp)
+    config._timestamp = timestamp
     os.makedirs(config.output_dir, exist_ok=True)
 
-    train_loader, val_loader, test_loader = get_dataloaders(config, mode='pretrain')
-    model = get_model(model_name="resnet", pretrained=True).to(config.device)
+    train_loader, _, test_loader = get_dataloaders(config, mode='pretrain')
+    model = get_model(model_name="unet", pretrained=False, pretrained_path=None).to(config.device)
 
-    pretrain(model, train_loader, val_loader, config)
+    pretrain(model, train_loader, None, config)
 
 if __name__ == "__main__":
     main()
