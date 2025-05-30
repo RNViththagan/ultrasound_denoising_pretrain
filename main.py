@@ -46,10 +46,10 @@ def main(args):
     """
     print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_gpu_info()
-    seed_everything(42)
 
     # Initialize config
     config = Config()
+    seed_everything(config.random_seed)
     dataset_dir = config.data_dir
     if not os.path.exists(dataset_dir) or not any(os.listdir(dataset_dir)):
         raise ValueError(f"Dataset not found at {dataset_dir}. Ensure {config.dataset_name} dataset is available.")

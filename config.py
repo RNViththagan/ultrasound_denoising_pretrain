@@ -12,6 +12,7 @@ class Config:
         self.batch_size = 8
         self.image_size = (256, 256)
         self.num_samples = 4  # Number of sample images to visualize
+        self.random_seed = 42  # Random seed for reproducibility
 
         # Model
         self.model_name = "unet"
@@ -50,6 +51,7 @@ class Config:
                 f"  Batch Size: {self.batch_size}\n"
                 f"  Image Size: {self.image_size}\n"
                 f"  Num Samples: {self.num_samples}\n"
+                f"  Random Seed: {self.random_seed}\n"
                 f"  Model: {self.model_name}\n"
                 f"  Pretrained Path: {self.pretrained_path}\n"
                 f"  Pretrain Epochs: {self.pretrain_epochs}\n"
