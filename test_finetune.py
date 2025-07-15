@@ -3,7 +3,7 @@ import random
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from utils import calculate_psnr, calculate_ssim, seed_everything, print_gpu_info
+from utils import calculate_psnr, calculate_ssim, calculate_brisque, seed_everything, print_gpu_info
 from model import get_model
 from datetime import datetime
 import os
@@ -17,9 +17,9 @@ def test_finetune(model, test_loader, config, num_samples):
     Description:
     - Inputs: Pseudo-clean images (Y, original BUSI/HC18 images).
     - Outputs: Denoised images (Y_hat = f(Y)).
-    - Objective: Evaluate denoising quality on test set using MSE loss, PSNR, and SSIM.
+    - Objective: Evaluate denoising quality on test set using MSE loss, PSNR, SSIM, and BRISQUE.
     - Outputs:
-      - Console output: Average test loss, PSNR, SSIM.
+      - Console output: Average test loss, PSNR, SSIM, BRISQUE.
       - Sample visualization for `num_samples` test images (input, denoised).
       - Visualization saved in outs/<timestamp>/test_results_finetune_noise{noise_std}.png.
     - Notes:
@@ -32,6 +32,8 @@ def test_finetune(model, test_loader, config, num_samples):
     test_loss = 0
     test_psnr = 0
     test_ssim = 0
+    test_brisque_input = 0
+    test_brisque_denoised = 0
 
     loss_fn = torch.nn.MSELoss()
     with torch.no_grad():
@@ -44,15 +46,23 @@ def test_finetune(model, test_loader, config, num_samples):
             test_loss += loss.item()
             test_psnr += calculate_psnr(loss).item()
             test_ssim += calculate_ssim(output, input).item()
+            brisque_input = calculate_brisque(input[0].detach().cpu().numpy().squeeze())
+            brisque_denoised = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
+            test_brisque_input += brisque_input
+            test_brisque_denoised += brisque_denoised
 
     avg_test_loss = test_loss / len(test_loader)
     avg_test_psnr = test_psnr / len(test_loader)
     avg_test_ssim = test_ssim / len(test_loader)
+    avg_brisque_input = test_brisque_input / len(test_loader)
+    avg_brisque_denoised = test_brisque_denoised / len(test_loader)
 
     print(f"📊 Finetuned Test Results (Y_hat vs. Y, Noise Std={config.noise_std}):")
     print(f"Average Test Loss: {avg_test_loss:.4f}")
     print(f"Average Test PSNR: {avg_test_psnr:.2f} dB")
     print(f"Average Test SSIM: {avg_test_ssim:.4f}")
+    print(f"Average BRISQUE (Input): {avg_brisque_input:.2f}")
+    print(f"Average BRISQUE (Denoised): {avg_brisque_denoised:.2f}")
 
     # Select random samples for visualization
     dataset = test_loader.dataset
@@ -76,18 +86,20 @@ def test_finetune(model, test_loader, config, num_samples):
         for i, sample in enumerate(sample_images):
             # Input (pseudo-clean)
             axes[i][0].imshow(sample['input'], cmap='gray')
-            axes[i][0].set_title("Input (Pseudo-Clean)")
+            brisque_input = calculate_brisque(sample['input'])
+            axes[i][0].set_title(f"Input (Pseudo-Clean, BRISQUE: {brisque_input:.2f})")
             axes[i][0].axis('off')
 
             # Denoised output
             axes[i][1].imshow(sample['denoised'], cmap='gray')
-            # Calculate per-sample PSNR and SSIM
-            input_tensor = torch.tensor(sample['input']).unsqueeze(0).unsqueeze(0)
-            denoised_tensor = torch.tensor(sample['denoised']).unsqueeze(0).unsqueeze(0)
+            # Calculate per-sample PSNR, SSIM, BRISQUE
+            input_tensor = torch.tensor(sample['input']).unsqueeze(0).unsqueeze(0).detach()
+            denoised_tensor = torch.tensor(sample['denoised']).unsqueeze(0).unsqueeze(0).detach()
             mse_loss = loss_fn(denoised_tensor, input_tensor)
             psnr = calculate_psnr(mse_loss).item()
             ssim = calculate_ssim(denoised_tensor, input_tensor).item()
-            axes[i][1].set_title(f"Denoised (PSNR: {psnr:.2f}, SSIM: {ssim:.4f})")
+            brisque_denoised = calculate_brisque(sample['denoised'])
+            axes[i][1].set_title(f"Denoised (PSNR: {psnr:.2f}, SSIM: {ssim:.4f}, BRISQUE: {brisque_denoised:.2f})")
             axes[i][1].axis('off')
 
         plt.tight_layout()
