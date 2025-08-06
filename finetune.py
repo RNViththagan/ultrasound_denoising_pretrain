@@ -9,12 +9,12 @@ import os
 
 def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
     """
-    Fine-tune the MedSeg U-Net using Noisier2Noise (N2N) for ultrasound denoising.
+    Fine-tune the MedSeg U-Net using Noisier2Noise (N2N) for ultrasound denoising with hybrid MSE-BRISQUE loss.
 
     Description:
     - Inputs: Doubly-noisy images (Z = Y + Y*M, where Y is pseudo-clean, M is noise with std=0.1).
     - Targets: Pseudo-clean images (Y, original BUSI/HC18 images).
-    - Objective: Minimize MSE loss to denoise images.
+    - Objective: Minimize hybrid loss (MSE + weighted BRISQUE) to denoise images.
     - Modes:
       - With pretrained: Load N2V-pretrained weights (from train.py).
       - From scratch: Use random initial weights.
@@ -26,15 +26,17 @@ def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
     - Notes:
       - No validation (70/30 train/test split).
       - Sample image is tracked to show denoising quality.
+      - BRISQUE is used as a non-differentiable regularizer in the loss.
     """
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.finetune_lr)
+    brisque_weight = 0.01  # Hyperparameter to balance BRISQUE contribution
 
     train_losses, train_psnrs, train_ssims, train_brisques = [], [], [], []
     sample_flow = None
 
     init_type = "Random weights" if skip_pretrain else "Noise2Void pretrained"
-    print(f"🟢 Starting fine-tuning with {init_type} weights (Noisier2Noise).")
+    print(f"🟢 Starting fine-tuning with {init_type} weights (Noisier2Noise, Hybrid MSE-BRISQUE Loss).")
 
     for epoch in range(config.finetune_epochs):
         model.train()
@@ -49,25 +51,29 @@ def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
             doubly_noisy, input = doubly_noisy.to(config.device), input.to(config.device)
 
             output = model(doubly_noisy)
-            loss = loss_fn(output, input)
+            mse_loss = loss_fn(output, input)
+
+            # Compute BRISQUE for the first image in the batch (non-differentiable)
+            with torch.no_grad():
+                brisque_score = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
+                brisque_loss = brisque_score * brisque_weight  # Scale BRISQUE contribution
+
+            # Combine MSE and BRISQUE-based loss
+            total_loss = mse_loss + brisque_loss
 
             optimizer.zero_grad()
-            loss.backward()
+            mse_loss.backward()  # Backprop only through MSE (BRISQUE is non-differentiable)
             optimizer.step()
 
-            psnr = calculate_psnr(loss).item()
+            psnr = calculate_psnr(mse_loss).item()
             ssim = calculate_ssim(output, input).item()
-            running_loss += loss.item()
+            running_loss += mse_loss.item()
             running_psnr += psnr
             running_ssim += ssim
+            running_brisque += brisque_score
+            n_brisque_samples += 1
 
-            # Compute BRISQUE every 10 epochs for first image in batch
-            if (epoch + 1) % 10 == 0:
-                brisque = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
-                running_brisque += brisque
-                n_brisque_samples += 1
-
-            loop.set_postfix(loss=loss.item(), psnr=psnr, ssim=ssim)
+            loop.set_postfix(loss=mse_loss.item(), psnr=psnr, ssim=ssim, brisque=brisque_score)
 
             # Capture sample flow for the tracked image
             if sample_flow is None and config.data_dir in img_path[0]:
