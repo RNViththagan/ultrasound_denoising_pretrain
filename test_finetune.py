@@ -12,28 +12,31 @@ import glob
 
 def test_finetune(model, test_loader, config, num_samples):
     """
-    Test the fine-tuned Noisier2Noise (N2N) MedSeg U-Net model.
+    Test the fine-tuned Noisier2Noise (N2N) MedSeg U-Net model with hybrid MSE-BRISQUE loss.
 
     Description:
     - Inputs: Pseudo-clean images (Y, original BUSI/HC18 images).
     - Outputs: Denoised images (Y_hat = f(Y)).
-    - Objective: Evaluate denoising quality on test set using MSE loss, PSNR, SSIM, and BRISQUE.
+    - Objective: Evaluate denoising quality on test set using total loss (MSE + weighted BRISQUE), MSE, PSNR, SSIM, and BRISQUE.
     - Outputs:
-      - Console output: Average test loss, PSNR, SSIM, BRISQUE.
+      - Console output: Average test total loss, MSE loss, PSNR, SSIM, BRISQUE (input and denoised).
       - Sample visualization for `num_samples` test images (input, denoised).
       - Visualization saved in outs/<timestamp>/test_results_finetune_noise{noise_std}.png.
     - Notes:
       - Loads fine-tuned model from the latest checkpoint in checkpoints/.
       - Uses random sampling for visualization.
+      - BRISQUE is used as a non-differentiable regularizer in the total loss, consistent with training.
     """
     seed_everything(config.random_seed)
 
     model.eval()
     test_loss = 0
+    test_mse_loss = 0
     test_psnr = 0
     test_ssim = 0
     test_brisque_input = 0
     test_brisque_denoised = 0
+    brisque_weight = 0.01  # Same as in finetune.py
 
     loss_fn = torch.nn.MSELoss()
     with torch.no_grad():
@@ -42,23 +45,28 @@ def test_finetune(model, test_loader, config, num_samples):
             input = input.to(config.device)
 
             output = model(input)  # Y_hat = f(Y)
-            loss = loss_fn(output, input)
-            test_loss += loss.item()
-            test_psnr += calculate_psnr(loss).item()
+            mse_loss = loss_fn(output, input)
+            brisque_score = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
+            brisque_loss = brisque_score * brisque_weight
+            total_loss = mse_loss + brisque_loss
+
+            test_loss += total_loss
+            test_mse_loss += mse_loss.item()
+            test_psnr += calculate_psnr(mse_loss).item()
             test_ssim += calculate_ssim(output, input).item()
-            brisque_input = calculate_brisque(input[0].detach().cpu().numpy().squeeze())
-            brisque_denoised = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
-            test_brisque_input += brisque_input
-            test_brisque_denoised += brisque_denoised
+            test_brisque_input += calculate_brisque(input[0].detach().cpu().numpy().squeeze())
+            test_brisque_denoised += brisque_score
 
     avg_test_loss = test_loss / len(test_loader)
+    avg_test_mse_loss = test_mse_loss / len(test_loader)
     avg_test_psnr = test_psnr / len(test_loader)
     avg_test_ssim = test_ssim / len(test_loader)
     avg_brisque_input = test_brisque_input / len(test_loader)
     avg_brisque_denoised = test_brisque_denoised / len(test_loader)
 
     print(f"📊 Finetuned Test Results (Y_hat vs. Y, Noise Std={config.noise_std}):")
-    print(f"Average Test Loss: {avg_test_loss:.4f}")
+    print(f"Average Test Total Loss (MSE + BRISQUE): {avg_test_loss:.4f}")
+    print(f"Average Test MSE Loss: {avg_test_mse_loss:.4f}")
     print(f"Average Test PSNR: {avg_test_psnr:.2f} dB")
     print(f"Average Test SSIM: {avg_test_ssim:.4f}")
     print(f"Average BRISQUE (Input): {avg_brisque_input:.2f}")
