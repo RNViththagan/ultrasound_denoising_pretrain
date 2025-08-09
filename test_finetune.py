@@ -3,7 +3,7 @@ import random
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from utils import calculate_psnr, calculate_ssim, calculate_brisque, seed_everything, print_gpu_info
+from utils import calculate_psnr, calculate_ssim, calculate_brisque, calculate_mscn_variance, seed_everything, print_gpu_info
 from model import get_model
 from datetime import datetime
 import os
@@ -12,12 +12,12 @@ import glob
 
 def test_finetune(model, test_loader, config, num_samples):
     """
-    Test the fine-tuned Noisier2Noise (N2N) MedSeg U-Net model with hybrid MSE-BRISQUE loss.
+    Test the fine-tuned Noisier2Noise (N2N) MedSeg U-Net model with hybrid MSE-MSCN variance loss.
 
     Description:
     - Inputs: Pseudo-clean images (Y, original BUSI/HC18 images).
     - Outputs: Denoised images (Y_hat = f(Y)).
-    - Objective: Evaluate denoising quality on test set using total loss (MSE + weighted BRISQUE), MSE, PSNR, SSIM, and BRISQUE.
+    - Objective: Evaluate denoising quality on test set using total loss (MSE + weighted MSCN variance), MSE, PSNR, SSIM, and BRISQUE.
     - Outputs:
       - Console output: Average test total loss, MSE loss, PSNR, SSIM, BRISQUE (input and denoised).
       - Sample visualization for `num_samples` test images (input, denoised).
@@ -25,7 +25,7 @@ def test_finetune(model, test_loader, config, num_samples):
     - Notes:
       - Loads fine-tuned model from the latest checkpoint in checkpoints/.
       - Uses random sampling for visualization.
-      - BRISQUE is used as a non-differentiable regularizer in the total loss, consistent with training.
+      - MSCN variance is a differentiable BRISQUE approximation; BRISQUE is used for monitoring.
     """
     seed_everything(config.random_seed)
 
@@ -36,7 +36,7 @@ def test_finetune(model, test_loader, config, num_samples):
     test_ssim = 0
     test_brisque_input = 0
     test_brisque_denoised = 0
-    brisque_weight = 0.01  # Same as in finetune.py
+    mscn_weight = 0.1  # Same as in finetune.py
 
     loss_fn = torch.nn.MSELoss()
     with torch.no_grad():
@@ -46,11 +46,13 @@ def test_finetune(model, test_loader, config, num_samples):
 
             output = model(input)  # Y_hat = f(Y)
             mse_loss = loss_fn(output, input)
-            brisque_score = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
-            brisque_loss = brisque_score * brisque_weight
-            total_loss = mse_loss + brisque_loss
+            mscn_variance = calculate_mscn_variance(output)
+            mscn_loss = mscn_weight * mscn_variance
+            total_loss = mse_loss + mscn_loss
 
-            test_loss += total_loss
+            brisque_score = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
+
+            test_loss += total_loss.item()
             test_mse_loss += mse_loss.item()
             test_psnr += calculate_psnr(mse_loss).item()
             test_ssim += calculate_ssim(output, input).item()
@@ -65,7 +67,7 @@ def test_finetune(model, test_loader, config, num_samples):
     avg_brisque_denoised = test_brisque_denoised / len(test_loader)
 
     print(f"📊 Finetuned Test Results (Y_hat vs. Y, Noise Std={config.noise_std}):")
-    print(f"Average Test Total Loss (MSE + BRISQUE): {avg_test_loss:.4f}")
+    print(f"Average Test Total Loss (MSE + MSCN Variance): {avg_test_loss:.4f}")
     print(f"Average Test MSE Loss: {avg_test_mse_loss:.4f}")
     print(f"Average Test PSNR: {avg_test_psnr:.2f} dB")
     print(f"Average Test SSIM: {avg_test_ssim:.4f}")
@@ -100,7 +102,6 @@ def test_finetune(model, test_loader, config, num_samples):
 
             # Denoised output
             axes[i][1].imshow(sample['denoised'], cmap='gray')
-            # Calculate per-sample PSNR, SSIM, BRISQUE
             input_tensor = torch.tensor(sample['input']).unsqueeze(0).unsqueeze(0).detach()
             denoised_tensor = torch.tensor(sample['denoised']).unsqueeze(0).unsqueeze(0).detach()
             mse_loss = loss_fn(denoised_tensor, input_tensor)
@@ -134,7 +135,6 @@ def main():
     config._timestamp = timestamp
     os.makedirs(config.output_dir, exist_ok=True)
 
-    # Find the latest checkpoint
     checkpoint_files = glob.glob(os.path.join(config.checkpoint_dir, "finetuned_unet_noise*.pth"))
     if not checkpoint_files:
         raise FileNotFoundError(f"No fine-tuned checkpoints found in {config.checkpoint_dir}")
