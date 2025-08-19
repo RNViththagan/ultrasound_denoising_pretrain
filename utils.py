@@ -45,11 +45,13 @@ def calculate_brisque(image):
 
     def generalized_gaussian_dist_fit(data):
         """Fit GGD to data and return shape parameter."""
+        # Estimate shape parameter using moment matching
         data = data.ravel()
         mean = np.mean(data)
         variance = np.var(data)
         if variance == 0:
             return 0.5  # Default shape to avoid division by zero
+        # Approximate shape parameter (simplified)
         gamma = np.log(2) / np.log(np.mean(np.abs(data - mean)**2) / variance)
         return max(0.2, min(gamma, 10.0))  # Constrain shape for stability
 
@@ -68,7 +70,9 @@ def calculate_brisque(image):
 
     def compute_mscn(image, kernel_size=7, sigma=7/6):
         """Compute MSCN coefficients."""
+        # Convert to float for processing
         img = image.astype(np.float32)
+        # Compute local mean and variance
         mu = ndimage.gaussian_filter(img, sigma=sigma, mode='reflect')
         mu_sq = mu * mu
         sigma = np.sqrt(np.abs(ndimage.gaussian_filter(img * img, sigma=sigma, mode='reflect') - mu_sq))
@@ -76,22 +80,32 @@ def calculate_brisque(image):
         mscn = (img - mu) / sigma
         return mscn
 
+    # Suppress warnings for numerical stability
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+
+        # Compute MSCN coefficients
         mscn = compute_mscn(image)
+
+        # Extract features at original scale
         features = []
+        # GGD features for MSCN
         shape = generalized_gaussian_dist_fit(mscn)
         features.append(shape)
         features.append(np.var(mscn))
+
+        # Pairwise products for AGGD
         pairwise = [
-            mscn[:-1, :-1] * mscn[:-1, 1:],
-            mscn[:-1, :-1] * mscn[1:, :-1],
-            mscn[:-1, :-1] * mscn[1:, 1:],
-            mscn[:-1, 1:] * mscn[1:, :-1]
+            mscn[:-1, :-1] * mscn[:-1, 1:],  # Horizontal
+            mscn[:-1, :-1] * mscn[1:, :-1],  # Vertical
+            mscn[:-1, :-1] * mscn[1:, 1:],   # Main diagonal
+            mscn[:-1, 1:] * mscn[1:, :-1]    # Secondary diagonal
         ]
         for pair in pairwise:
             alpha, beta_l, beta_r = asymmetric_gaussian_dist_fit(pair)
             features.extend([alpha, beta_l, beta_r, (beta_l + beta_r) / 2])
+
+        # Downscale image by factor of 2
         downscaled = image[::2, ::2]
         mscn_down = compute_mscn(downscaled)
         shape_down = generalized_gaussian_dist_fit(mscn_down)
@@ -106,20 +120,11 @@ def calculate_brisque(image):
         for pair in pairwise_down:
             alpha, beta_l, beta_r = asymmetric_gaussian_dist_fit(pair)
             features.extend([alpha, beta_l, beta_r, (beta_l + beta_r) / 2])
-        score = np.mean(features[1::4]) * 100
-        return np.clip(score, 0, 100)
 
-def calculate_mscn_variance(images, kernel_size=7, sigma=7/6):
-    """Compute differentiable MSCN variance for a batch of images."""
-    images = images.float()
-    kernel = torch.ones(1, 1, kernel_size, kernel_size, device=images.device) / (kernel_size**2)
-    mu = torch.nn.functional.conv2d(images, kernel, padding=kernel_size//2)
-    mu_sq = mu * mu
-    sigma = torch.sqrt(torch.abs(torch.nn.functional.conv2d(images * images, kernel, padding=kernel_size//2) - mu_sq))
-    sigma = torch.clamp(sigma, min=1e-10)
-    mscn = (images - mu) / sigma
-    mscn_variance = torch.var(mscn, dim=(2, 3), keepdim=False).mean(dim=1)
-    return mscn_variance.mean()
+        # Simplified scoring (mean of MSCN variance as placeholder)
+        # Note: Full BRISQUE requires SVR, which needs pre-trained weights
+        score = np.mean(features[1::4]) * 100  # Scale variance-based features
+        return np.clip(score, 0, 100)  # Constrain to typical BRISQUE range
 
 def save_checkpoint(model, checkpoint_dir, filename):
     """Save model checkpoint."""

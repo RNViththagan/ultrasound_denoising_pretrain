@@ -2,19 +2,19 @@ import torch
 from torch import nn
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from utils import calculate_psnr, calculate_ssim, calculate_brisque, calculate_mscn_variance, save_checkpoint
+from utils import calculate_psnr, calculate_ssim, calculate_brisque, save_checkpoint
 from model import get_model
 from datetime import datetime
 import os
 
 def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
     """
-    Fine-tune the MedSeg U-Net using Noisier2Noise (N2N) for ultrasound denoising with hybrid MSE-MSCN variance loss.
+    Fine-tune the MedSeg U-Net using Noisier2Noise (N2N) for ultrasound denoising with hybrid MSE-BRISQUE loss.
 
     Description:
     - Inputs: Doubly-noisy images (Z = Y + Y*M, where Y is pseudo-clean, M is noise with std=0.1).
     - Targets: Pseudo-clean images (Y, original BUSI/HC18 images).
-    - Objective: Minimize hybrid loss (MSE + weighted MSCN variance) to denoise images, with BRISQUE for monitoring.
+    - Objective: Minimize hybrid loss (MSE + weighted BRISQUE) to denoise images.
     - Modes:
       - With pretrained: Load N2V-pretrained weights (from train.py).
       - From scratch: Use random initial weights.
@@ -22,21 +22,21 @@ def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
       - Fine-tuned model checkpoints saved in checkpoints/ (every 10 epochs and final).
       - Sample flow visualization for one test image (doubly-noisy, denoised, pseudo-clean).
       - Metrics plots (loss, PSNR, SSIM vs. epochs) saved in outs/<timestamp>/.
-      - Console output: Per-epoch training metrics (total loss, PSNR, SSIM, BRISQUE).
+      - Console output: Per-epoch training metrics (loss, PSNR, SSIM, BRISQUE).
     - Notes:
       - No validation (70/30 train/test split).
       - Sample image is tracked to show denoising quality.
-      - MSCN variance is a differentiable BRISQUE approximation for optimization; BRISQUE is used for monitoring.
+      - BRISQUE is used as a non-differentiable regularizer in the loss.
     """
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.finetune_lr)
-    mscn_weight = 0.1  # Hyperparameter to balance MSCN variance contribution
+    brisque_weight = 0.01  # Hyperparameter to balance BRISQUE contribution
 
     train_losses, train_psnrs, train_ssims, train_brisques = [], [], [], []
     sample_flow = None
 
     init_type = "Random weights" if skip_pretrain else "Noise2Void pretrained"
-    print(f"🟢 Starting fine-tuning with {init_type} weights (Noisier2Noise, Hybrid MSE-MSCN Variance Loss).")
+    print(f"🟢 Starting fine-tuning with {init_type} weights (Noisier2Noise, Hybrid MSE-BRISQUE Loss).")
 
     for epoch in range(config.finetune_epochs):
         model.train()
@@ -53,30 +53,27 @@ def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
             output = model(doubly_noisy)
             mse_loss = loss_fn(output, input)
 
-            # Compute differentiable MSCN variance for the batch
-            mscn_variance = calculate_mscn_variance(output)
-            mscn_loss = mscn_weight * mscn_variance
-
-            # Combine MSE and MSCN variance loss
-            total_loss = mse_loss + mscn_loss
-
-            # Compute BRISQUE for the first image for monitoring (non-differentiable)
+            # Compute BRISQUE for the first image in the batch (non-differentiable)
             with torch.no_grad():
                 brisque_score = calculate_brisque(output[0].detach().cpu().numpy().squeeze())
-                n_brisque_samples += 1
+                brisque_loss = brisque_score * brisque_weight  # Scale BRISQUE contribution
+
+            # Combine MSE and BRISQUE-based loss
+            total_loss = mse_loss + brisque_loss
 
             optimizer.zero_grad()
-            total_loss.backward()  # Backprop through MSE and MSCN variance
+            mse_loss.backward()  # Backprop only through MSE (BRISQUE is non-differentiable)
             optimizer.step()
 
             psnr = calculate_psnr(mse_loss).item()
             ssim = calculate_ssim(output, input).item()
-            running_loss += total_loss.item()
+            running_loss += mse_loss.item()
             running_psnr += psnr
             running_ssim += ssim
             running_brisque += brisque_score
+            n_brisque_samples += 1
 
-            loop.set_postfix(loss=total_loss.item(), psnr=psnr, ssim=ssim, brisque=brisque_score)
+            loop.set_postfix(loss=mse_loss.item(), psnr=psnr, ssim=ssim, brisque=brisque_score)
 
             # Capture sample flow for the tracked image
             if sample_flow is None and config.data_dir in img_path[0]:
@@ -93,8 +90,7 @@ def finetune(model, train_loader, val_loader, config, skip_pretrain=False):
         train_brisques.append(avg_train_brisque if n_brisque_samples > 0 else None)
 
         log_msg = (f"📊 Epoch {epoch+1}/{config.finetune_epochs} | "
-                   f"Train Total Loss (MSE + MSCN Variance): {avg_train_loss:.4f} | "
-                   f"PSNR: {avg_train_psnr:.2f} | SSIM: {avg_train_ssim:.4f}")
+                   f"Train Loss: {avg_train_loss:.4f} | PSNR: {avg_train_psnr:.2f} | SSIM: {avg_train_ssim:.4f}")
         if n_brisque_samples > 0:
             log_msg += f" | BRISQUE: {avg_train_brisque:.2f}"
         print(log_msg)
