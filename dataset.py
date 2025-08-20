@@ -2,11 +2,14 @@ import os
 from PIL import Image
 from torch.utils.data import Dataset, random_split, DataLoader
 import torch
+import torch.nn.functional as F
 import numpy as np
-from torchvision import transforms
+from monai.transforms import Compose, RandRotate, RandFlip, RandAdjustContrast, RandGaussianNoise, Rand2DElastic
 
 class BUSIDataset(Dataset):
-    def __init__(self, root_dir, transform=None, mode='pretrain', mask_ratio=0.1, noise_std=0.1, split='train', exclude_paths=None):
+    def __init__(self, root_dir, transform=None, mode='pretrain',
+                 mask_ratio=0.1, noise_std=0.1, split='train',
+                 exclude_paths=None, augment=False):
         self.root_dir = root_dir
         self.transform = transform
         self.mode = mode  # 'pretrain' (Noise2Void), 'finetune' (Noisier2Noise)
@@ -16,7 +19,26 @@ class BUSIDataset(Dataset):
         self.exclude_paths = exclude_paths or []  # Paths to exclude (e.g., test images for train/val)
         self.image_paths = []
         self.class_counts = {'benign': 0, 'malignant': 0, 'normal': 0}
+        self.augment = augment
 
+        # Runtime augmentation pipeline
+        self.augmentation = None
+        if self.augment:
+            self.augmentation = Compose([
+                RandRotate(range_x=15.0, prob=0.5),           # Rotate ±15 degrees
+                RandFlip(spatial_axis=0, prob=0.5),           # Horizontal flip
+                RandFlip(spatial_axis=1, prob=0.5),           # Vertical flip
+                RandAdjustContrast(prob=0.3, gamma=(0.8, 1.2)), # Adjust contrast
+                RandGaussianNoise(prob=0.2, std=0.05),        # Speckle-like Gaussian noise
+                Rand2DElastic(
+                    spacing=(30, 30),                         # Elastic deformation grid
+                    magnitude_range=(1, 2),                   # Deformation magnitude
+                    prob=0.3,
+                    mode='bilinear'
+                ),  # Elastic deformations
+            ])
+
+        # Collect BUSI images
         for label in ['benign', 'malignant', 'normal']:
             folder = os.path.join(root_dir, label)
             if not os.path.exists(folder):
@@ -35,7 +57,7 @@ class BUSIDataset(Dataset):
                     self.class_counts[label] += 1
 
         if not self.image_paths:
-            raise ValueError(f"No images found in the dataset directory for split={self.split}.")
+            raise ValueError(f"No images found in dataset for split={self.split}.")
 
     def __len__(self):
         return len(self.image_paths)
@@ -45,11 +67,24 @@ class BUSIDataset(Dataset):
         try:
             image = Image.open(img_path).convert('L')
         except Exception as e:
-            print(f"Error loading image {img_path}: {e}")
+            print(f"Error loading {img_path}: {e}")
             image = Image.new('L', (256, 256), color=0)
 
-        if self.transform:
-            image = self.transform(image)
+        # Convert to tensor [1, H, W], normalized to [0,1]
+        image_np = np.array(image)
+        if image_np.ndim != 2:
+            image_np = np.zeros((256, 256), dtype=np.uint8)
+        # Convert to tensor with channel dimension
+        image = torch.tensor(image_np, dtype=torch.float32).unsqueeze(0) / 255.0  # Shape: [1, H, W]
+
+        # Apply runtime augmentation
+        if self.augment and self.augmentation:
+            image = self.augmentation(image)
+
+        # Resize to [1, 256, 256]
+        image = image.unsqueeze(0)  # Shape: [1, 1, H, W]
+        image = F.interpolate(image, size=(256, 256), mode='bilinear', align_corners=False)
+        image = image.squeeze(0)  # Shape: [1, H, W]
 
         if self.mode == 'pretrain':
             # Noise2Void: masked input
@@ -61,10 +96,9 @@ class BUSIDataset(Dataset):
         else:
             # Noisier2Noise: doubly-noisy input (Z = Y + Y*M), input target (Y)
             noise = torch.randn_like(image) * self.noise_std
-            input = image  # Y (BUSI image, pseudo-clean)
-            doubly_noisy = input + input * noise  # Z = Y + Y*M
-            doubly_noisy = torch.clamp(doubly_noisy, 0, 1)
-            return doubly_noisy, input  # Z, Y
+            input = image
+            doubly_noisy = torch.clamp(input + input * noise, 0, 1)
+            return doubly_noisy, input
 
     def get_stats(self):
         return {
@@ -73,7 +107,7 @@ class BUSIDataset(Dataset):
         }
 
 def get_dataloaders(config, mode='pretrain'):
-    # Load original dataset for test (only original images)
+    # Original dataset for test
     original_dataset = BUSIDataset(
         config.data_dir,
         config.transform,
@@ -94,7 +128,8 @@ def get_dataloaders(config, mode='pretrain'):
         mask_ratio=0.1,
         noise_std=config.noise_std,
         split='train',
-        exclude_paths=original_dataset.image_paths  # Exclude test images
+        exclude_paths=original_dataset.image_paths,
+        augment=True   # ✅ runtime augmentations
     )
     full_stats = full_dataset.get_stats()
     n_full = full_stats['total_images']  # ~4680 - n_original
@@ -108,13 +143,9 @@ def get_dataloaders(config, mode='pretrain'):
     test_set, _ = random_split(original_dataset, [n_test, n_original - n_test])
 
     print("📊 Dataset Statistics:")
-    print(f"Total Images (Train): {len(train_set)}")
-    print(f"Total Images (Val): {len(val_set)}")
-    print(f"Total Images (Test): {len(test_set)}")
+    print(f"Train: {len(train_set)}, Val: {len(val_set)}, Test: {len(test_set)}")
     print(f"Train Class Counts: {full_stats['class_counts']}")
     print(f"Test Class Counts: {original_stats['class_counts']}")
-    print(f"Train/Val/Test Split: {len(train_set)}/{len(val_set)}/{len(test_set)} "
-          f"({config.split_ratio[0]*100:.1f}%/{config.split_ratio[1]*100:.1f}%/{config.split_ratio[2]*100:.1f}%)")
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False, num_workers=0)
