@@ -3,7 +3,7 @@ import random
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from utils import calculate_psnr, calculate_ssim, calculate_brisque, seed_everything, print_gpu_info
+from utils import calculate_psnr, calculate_ssim, calculate_brisque, calculate_snr, calculate_cnr, calculate_gcnr, seed_everything, print_gpu_info
 from model import get_model
 from datetime import datetime
 import os
@@ -12,16 +12,16 @@ import glob
 
 def test_finetune(model, test_loader, config, num_samples):
     """
-    Test the fine-tuned Noisier2Noise (N2N) MedSeg U-Net model with hybrid MSE-BRISQUE loss.
+    Test the fine-tuned Noisier2Noise (N2N) model with hybrid MSE-BRISQUE loss.
 
     Description:
-    - Inputs: Pseudo-clean images (Y, original BUSI/HC18 images).
+    - Inputs: Original images (Y, from BUSI/HC18 datasets, assumed clean or minimally noisy).
     - Outputs: Denoised images (Y_hat = f(Y)).
-    - Objective: Evaluate denoising quality on test set using total loss (MSE + weighted BRISQUE), MSE, PSNR, SSIM, and BRISQUE.
+    - Objective: Evaluate denoising quality on test set using total loss (MSE + weighted BRISQUE), MSE, PSNR, SSIM, BRISQUE, SNR, CNR, and gCNR.
     - Outputs:
-      - Console output: Average test total loss, MSE loss, PSNR, SSIM, BRISQUE (input and denoised).
-      - Sample visualization for `num_samples` test images (input, denoised).
-      - Visualization saved in outs/<timestamp>/test_results_finetune_noise{noise_std}.png.
+      - Console output: Average metrics for Input (BRISQUE) and Denoised (Total Loss, MSE, PSNR, SSIM, BRISQUE, SNR, CNR, gCNR).
+      - Sample visualization for `num_samples` test images (Input, Denoised).
+      - Visualization saved in outs/<timestamp>/{model}/test_results_finetune_noise{noise_std}.png.
     - Notes:
       - Loads fine-tuned model from the latest checkpoint in checkpoints/.
       - Uses random sampling for visualization.
@@ -36,6 +36,9 @@ def test_finetune(model, test_loader, config, num_samples):
     test_ssim = 0
     test_brisque_input = 0
     test_brisque_denoised = 0
+    test_snr = 0
+    test_cnr = 0
+    test_gcnr = 0
     brisque_weight = 0.01  # Same as in finetune.py
 
     loss_fn = torch.nn.MSELoss()
@@ -56,6 +59,9 @@ def test_finetune(model, test_loader, config, num_samples):
             test_ssim += calculate_ssim(output, input).item()
             test_brisque_input += calculate_brisque(input[0].detach().cpu().numpy().squeeze())
             test_brisque_denoised += brisque_score
+            test_snr += calculate_snr(output, input).item()
+            test_cnr += calculate_cnr(output, input).item()
+            test_gcnr += calculate_gcnr(output, input)
 
     avg_test_loss = test_loss / len(test_loader)
     avg_test_mse_loss = test_mse_loss / len(test_loader)
@@ -63,14 +69,22 @@ def test_finetune(model, test_loader, config, num_samples):
     avg_test_ssim = test_ssim / len(test_loader)
     avg_brisque_input = test_brisque_input / len(test_loader)
     avg_brisque_denoised = test_brisque_denoised / len(test_loader)
+    avg_test_snr = test_snr / len(test_loader)
+    avg_test_cnr = test_cnr / len(test_loader)
+    avg_test_gcnr = test_gcnr / len(test_loader)
 
-    print(f"📊 Finetuned Test Results (Y_hat vs. Y, Noise Std={config.noise_std}):")
-    print(f"Average Test Total Loss (MSE + BRISQUE): {avg_test_loss:.4f}")
-    print(f"Average Test MSE Loss: {avg_test_mse_loss:.4f}")
-    print(f"Average Test PSNR: {avg_test_psnr:.2f} dB")
-    print(f"Average Test SSIM: {avg_test_ssim:.4f}")
-    print(f"Average BRISQUE (Input): {avg_brisque_input:.2f}")
-    print(f"Average BRISQUE (Denoised): {avg_brisque_denoised:.2f}")
+    print(f"📊 Finetuned Test Results (Noise Std={config.noise_std}):")
+    print("Input Metrics:")
+    print(f"  Average BRISQUE: {avg_brisque_input:.2f}")
+    print("Denoised Metrics:")
+    print(f"  Average Total Loss (MSE + BRISQUE): {avg_test_loss:.4f}")
+    print(f"  Average MSE Loss: {avg_test_mse_loss:.4f}")
+    print(f"  Average PSNR: {avg_test_psnr:.2f} dB")
+    print(f"  Average SSIM: {avg_test_ssim:.4f}")
+    print(f"  Average SNR: {avg_test_snr:.2f} dB")
+    print(f"  Average CNR: {avg_test_cnr:.4f}")
+    print(f"  Average gCNR: {avg_test_gcnr:.4f}")
+    print(f"  Average BRISQUE: {avg_brisque_denoised:.2f}")
 
     # Select random samples for visualization
     dataset = test_loader.dataset
@@ -78,7 +92,7 @@ def test_finetune(model, test_loader, config, num_samples):
     sample_images = []
     with torch.no_grad():
         for idx in sample_indices:
-            _, input, _ = dataset[idx]  # Get pseudo-clean image (Y)
+            _, input, _ = dataset[idx]  # Get original image (Y)
             input = input.unsqueeze(0).to(config.device)  # Add batch dimension
             output = model(input)  # Y_hat
             sample_images.append({
@@ -88,31 +102,38 @@ def test_finetune(model, test_loader, config, num_samples):
 
     # Visualize sample images
     if sample_images:
-        fig, axes = plt.subplots(num_samples, 2, figsize=(8, 4 * num_samples))
+        fig, axes = plt.subplots(num_samples, 2, figsize=(12, 5 * num_samples))
         if num_samples == 1:
             axes = [axes]  # Ensure axes is iterable for single sample
         for i, sample in enumerate(sample_images):
-            # Input (pseudo-clean)
+            # Input
             axes[i][0].imshow(sample['input'], cmap='gray')
             brisque_input = calculate_brisque(sample['input'])
-            axes[i][0].set_title(f"Input (Pseudo-Clean, BRISQUE: {brisque_input:.2f})")
+            axes[i][0].set_title(f"Input\nBRISQUE: {brisque_input:.2f}", fontsize=10, pad=10)
             axes[i][0].axis('off')
 
             # Denoised output
             axes[i][1].imshow(sample['denoised'], cmap='gray')
-            # Calculate per-sample PSNR, SSIM, BRISQUE
             input_tensor = torch.tensor(sample['input']).unsqueeze(0).unsqueeze(0).detach()
             denoised_tensor = torch.tensor(sample['denoised']).unsqueeze(0).unsqueeze(0).detach()
             mse_loss = loss_fn(denoised_tensor, input_tensor)
             psnr = calculate_psnr(mse_loss).item()
             ssim = calculate_ssim(denoised_tensor, input_tensor).item()
             brisque_denoised = calculate_brisque(sample['denoised'])
-            axes[i][1].set_title(f"Denoised (PSNR: {psnr:.2f}, SSIM: {ssim:.4f}, BRISQUE: {brisque_denoised:.2f})")
+            snr = calculate_snr(denoised_tensor, input_tensor).item()
+            cnr = calculate_cnr(denoised_tensor, input_tensor).item()
+            gcnr = calculate_gcnr(denoised_tensor, input_tensor)
+            axes[i][1].set_title(
+                f"Denoised\n"
+                f"PSNR: {psnr:.2f} dB\nSSIM: {ssim:.4f}\nBRISQUE: {brisque_denoised:.2f}\n"
+                f"SNR: {snr:.2f} dB\nCNR: {cnr:.4f}\ngCNR: {gcnr:.4f}",
+                fontsize=10, pad=10
+            )
             axes[i][1].axis('off')
 
-        plt.tight_layout()
+        plt.tight_layout(pad=2.0)
         save_path = os.path.join(config.output_dir, f"test_results_finetune_noise{config.noise_std}.png")
-        plt.savefig(save_path)
+        plt.savefig(save_path, bbox_inches='tight')
         plt.show()
         print(f"📸 Saved sample visualizations to {save_path}")
 
@@ -123,6 +144,8 @@ def main():
     parser = argparse.ArgumentParser(description="Test fine-tuned model for ultrasound denoising")
     parser.add_argument('--num_samples', type=int, default=4,
                         help="Number of sample images to visualize")
+    parser.add_argument('--model', type=str, choices=['unet', 'resnet'], default='unet',
+                        help="Model to test: 'unet' (MedSegUNet) or 'resnet' (ModifiedResNet)")
     args = parser.parse_args()
 
     print(f"🕒 Run started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -130,19 +153,20 @@ def main():
 
     config = Config()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    config.output_dir = os.path.join("./outs", timestamp)
+    config.output_dir = os.path.join("./outs", timestamp, args.model)
     config._timestamp = timestamp
     os.makedirs(config.output_dir, exist_ok=True)
 
     # Find the latest checkpoint
-    checkpoint_files = glob.glob(os.path.join(config.checkpoint_dir, "finetuned_unet_noise*.pth"))
+    checkpoint_pattern = os.path.join(config.checkpoint_dir, f"finetuned_{args.model}_noise*.pth")
+    checkpoint_files = glob.glob(checkpoint_pattern)
     if not checkpoint_files:
-        raise FileNotFoundError(f"No fine-tuned checkpoints found in {config.checkpoint_dir}")
+        raise FileNotFoundError(f"No fine-tuned checkpoints found for {args.model} in {config.checkpoint_dir}")
     checkpoint_path = max(checkpoint_files, key=os.path.getmtime)
     print(f"✅ Using latest checkpoint: {checkpoint_path}")
 
     _, _, test_loader = get_dataloaders(config, mode='finetune')
-    model = get_model(model_name="unet", pretrained=False, pretrained_path=None).to(config.device)
+    model = get_model(model_name=args.model, pretrained=(args.model == 'resnet'), pretrained_path=None).to(config.device)
 
     if os.path.exists(checkpoint_path):
         model.load_state_dict(torch.load(checkpoint_path, map_location=config.device))
@@ -150,7 +174,7 @@ def main():
     else:
         raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
 
-    print(f"🧪 Testing on {len(test_loader.dataset)} test images")
+    print(f"🧪 Testing {args.model.upper()} on {len(test_loader.dataset)} test images")
     test_finetune(model, test_loader, config, args.num_samples)
 
 if __name__ == "__main__":

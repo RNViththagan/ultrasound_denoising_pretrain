@@ -31,8 +31,6 @@ def pretrain(model, train_loader, val_loader, config):
     train_losses, train_psnrs, train_ssims = [], [], []
     sample_flow = None
 
-    print("🟢 Starting pretraining with random initial weights (Noise2Void).")
-
     for epoch in range(config.pretrain_epochs):
         model.train()
         running_loss = 0

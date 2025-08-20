@@ -30,6 +30,38 @@ def calculate_ssim(pred, target):
     ssim = SSIM(window_size=11, size_average=True)
     return ssim(pred, target)
 
+def calculate_snr(pred, target):
+    """Calculate SNR (Signal-to-Noise Ratio) in dB."""
+    signal = target
+    noise = pred - target
+    signal_power = torch.var(signal)
+    noise_power = torch.var(noise)
+    if noise_power == 0:
+        return torch.tensor(float('inf'))
+    return 10 * torch.log10(signal_power / noise_power)
+
+def calculate_cnr(pred, target):
+    """Calculate CNR (Contrast-to-Noise Ratio), approximated globally."""
+    # Approximate regions by splitting image into high/low intensity (threshold at median)
+    median = torch.median(target)
+    region1 = target[target > median]
+    region2 = target[target <= median]
+    mu1 = torch.mean(region1) if region1.numel() > 0 else torch.tensor(0.0, device=target.device)
+    mu2 = torch.mean(region2) if region2.numel() > 0 else torch.tensor(0.0, device=target.device)
+    noise = pred - target
+    noise_std = torch.std(noise) if noise.numel() > 0 else torch.tensor(1e-10, device=target.device)
+    cnr = torch.abs(mu1 - mu2) / noise_std
+    return cnr
+
+def calculate_gcnr(pred, target, bins=100):
+    """Calculate gCNR (Generalized Contrast-to-Noise Ratio) using histogram overlap."""
+    pred_np = pred.cpu().numpy().flatten()
+    target_np = target.cpu().numpy().flatten()
+    hist_pred, bins = np.histogram(pred_np, bins=bins, range=(0, 1), density=True)
+    hist_target, _ = np.histogram(target_np, bins=bins, range=(0, 1), density=True)
+    overlap = np.minimum(hist_pred, hist_target).sum()
+    return 1.0 - overlap
+
 def calculate_brisque(image):
     """Calculate BRISQUE score for a single grayscale image (numpy array in [0, 1])."""
     # Ensure image is in [0, 255] and uint8
