@@ -49,6 +49,8 @@ def main(args):
 
     # Initialize config
     config = Config()
+    if args.noise_std is not None:
+        config.noise_std = args.noise_std
     seed_everything(config.random_seed)
     dataset_dir = config.data_dir
     if not os.path.exists(dataset_dir) or not any(os.listdir(dataset_dir)):
@@ -94,5 +96,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ultrasound Image Denoising Pipeline")
     parser.add_argument('--model', type=str, choices=['unet', 'resnet', 'both'], default='both',
                         help="Model to run: 'unet' (MedSegUNet), 'resnet' (ModifiedResNet), or 'both'")
+    parser.add_argument('--noise_std', type=float, default=None,
+                        help="Standard deviation of noise for training (overrides config.noise_std if provided)")
     args = parser.parse_args()
     main(args)
