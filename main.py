@@ -51,6 +51,10 @@ def main(args):
     config = Config()
     if args.noise_std is not None:
         config.noise_std = args.noise_std
+    if args.finetune_epochs is not None:
+        config.finetune_epochs = args.finetune_epochs
+    if args.pretrain_epochs is not None:
+        config.pretrain_epochs = args.pretrain_epochs
     seed_everything(config.random_seed)
     dataset_dir = config.data_dir
     if not os.path.exists(dataset_dir) or not any(os.listdir(dataset_dir)):
@@ -77,9 +81,10 @@ def main(args):
         model = get_model(model_name=model_name, pretrained=(model_name == 'resnet')).to(config.device)
         
         # Pretrain (Noise2Void)
-        print(f"\n🚀 Starting Pretraining (Noise2Void) for {model_name.upper()}...")
-        pretrain(model, train_loader_pretrain, None, config)
-        test_pretrain(model, test_loader_pretrain, config)
+        if not args.skip_pretrain:
+            print(f"\n🚀 Starting Pretraining (Noise2Void) for {model_name.upper()}...")
+            pretrain(model, train_loader_pretrain, None, config)
+            test_pretrain(model, test_loader_pretrain, config)
 
         # Finetune (Noisier2Noise)
         print(f"\n🚀 Starting Fine-tuning (Noisier2Noise) for {model_name.upper()}...")
@@ -89,7 +94,7 @@ def main(args):
             print(f"✅ Loaded pretrained weights from {pretrained_checkpoint}")
         else:
             print(f"⚠️ Pretrained checkpoint not found at {pretrained_checkpoint}. Using {'ImageNet' if model_name == 'resnet' else 'current'} weights.")
-        finetune(model, train_loader_finetune, None, config, skip_pretrain=(model_name == 'resnet'))
+        finetune(model, train_loader_finetune, None, config, skip_pretrain=(model_name == 'resnet' or args.skip_pretrain))
         test_finetune(model, test_loader_finetune, config, config.num_samples)
 
 if __name__ == "__main__":
@@ -98,5 +103,11 @@ if __name__ == "__main__":
                         help="Model to run: 'unet' (MedSegUNet), 'resnet' (ModifiedResNet), or 'both'")
     parser.add_argument('--noise_std', type=float, default=None,
                         help="Standard deviation of noise for training (overrides config.noise_std if provided)")
+    parser.add_argument('--skip_pretrain', action='store_true', default=False,
+                        help="Skip pretraining and proceed directly to fine-tuning")
+    parser.add_argument('--finetune_epochs', type=int, default=None,
+                        help="Number of fine-tuning epochs (overrides config.finetune_epochs if provided)")
+    parser.add_argument('--pretrain_epochs', type=int, default=None,
+                        help="Number of pre-training epochs (overrides config.pretrain_epochs if provided)")
     args = parser.parse_args()
     main(args)
