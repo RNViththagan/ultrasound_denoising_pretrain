@@ -55,7 +55,14 @@ def main(args):
         config.finetune_epochs = args.finetune_epochs
     if args.pretrain_epochs is not None:
         config.pretrain_epochs = args.pretrain_epochs
+    if args.dataset.lower() == 'hc18':
+        config.dataset_name = "HC18"
+        config.data_dir = f"../Data_sets/HC18/"  # BUSI or HC18 root
+    if args.dataset.lower() == 'busi':
+        config.dataset_name = "BUSI"
+        config.data_dir = f"../Data_sets/BUSI/"  # BUSI or HC18 root
     seed_everything(config.random_seed)
+
     dataset_dir = config.data_dir
     if not os.path.exists(dataset_dir) or not any(os.listdir(dataset_dir)):
         raise ValueError(f"Dataset not found at {dataset_dir}. Ensure {config.dataset_name} dataset is available.")
@@ -109,5 +116,9 @@ if __name__ == "__main__":
                         help="Number of fine-tuning epochs (overrides config.finetune_epochs if provided)")
     parser.add_argument('--pretrain_epochs', type=int, default=None,
                         help="Number of pre-training epochs (overrides config.pretrain_epochs if provided)")
+    # Argument for dataset
+    parser.add_argument('--dataset', type=str, default='busi', choices=['busi', 'hc18'],
+                        help="Dataset to use for training (default: 'busi')")
+
     args = parser.parse_args()
     main(args)
