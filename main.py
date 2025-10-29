@@ -2,6 +2,7 @@ import argparse
 import os
 import torch
 from datetime import datetime
+import random
 from train import pretrain
 from finetune import finetune
 from test_pretrain import test_pretrain
@@ -57,11 +58,16 @@ def main(args):
         config.pretrain_epochs = args.pretrain_epochs
     if args.dataset.lower() == 'hc18':
         config.dataset_name = "HC18"
-        config.data_dir = f"../Data_sets/HC18/"  # BUSI or HC18 root
+        config.data_dir = f"../Data_sets/HC18/"
     if args.dataset.lower() == 'busi':
         config.dataset_name = "BUSI"
-        config.data_dir = f"../Data_sets/BUSI/"  # BUSI or HC18 root
+        config.data_dir = f"../Data_sets/BUSI/"
+    if args.seed is not None:
+        config.random_seed = args.seed
+    else:
+        config.random_seed = random.randint(0, 100000)
     seed_everything(config.random_seed)
+    print(f"🌱 Using random seed: {config.random_seed}")
 
     dataset_dir = config.data_dir
     if not os.path.exists(dataset_dir) or not any(os.listdir(dataset_dir)):
@@ -96,11 +102,11 @@ def main(args):
         # Finetune (Noisier2Noise)
         print(f"\n🚀 Starting Fine-tuning (Noisier2Noise) for {model_name.upper()}...")
         pretrained_checkpoint = os.path.join(config.checkpoint_dir, f"pretrained_unet_final_{timestamp}.pth" if model_name == 'unet' else f"pretrained_resnet_final_{timestamp}.pth")
-        if os.path.exists(pretrained_checkpoint):
+        if os.path.exists(pretrained_checkpoint) and not args.skip_pretrain and args.use_checkpoint:
             model.load_state_dict(torch.load(pretrained_checkpoint, map_location=config.device))
             print(f"✅ Loaded pretrained weights from {pretrained_checkpoint}")
         else:
-            print(f"⚠️ Pretrained checkpoint not found at {pretrained_checkpoint}. Using {'ImageNet' if model_name == 'resnet' else 'current'} weights.")
+            print(f"⚠️ Pretrained checkpoint not found or skipped. Using {'ImageNet' if model_name == 'resnet' else 'random'} weights.")
         finetune(model, train_loader_finetune, None, config, skip_pretrain=(model_name == 'resnet' or args.skip_pretrain))
         test_finetune(model, test_loader_finetune, config, config.num_samples)
 
@@ -116,9 +122,11 @@ if __name__ == "__main__":
                         help="Number of fine-tuning epochs (overrides config.finetune_epochs if provided)")
     parser.add_argument('--pretrain_epochs', type=int, default=None,
                         help="Number of pre-training epochs (overrides config.pretrain_epochs if provided)")
-    # Argument for dataset
     parser.add_argument('--dataset', type=str, default='busi', choices=['busi', 'hc18'],
                         help="Dataset to use for training (default: 'busi')")
-
+    parser.add_argument('--seed', type=int, default=None,
+                        help="Random seed for training (overrides config.random_seed if provided; random if not set)")
+    parser.add_argument('--use_checkpoint', action='store_true', default=False,
+                        help="Use existing pretrained checkpoint if available")
     args = parser.parse_args()
     main(args)
