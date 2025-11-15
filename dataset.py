@@ -122,6 +122,18 @@ class UltrasoundDataset(Dataset):
             doubly_noisy = input + input * noise  # Z = Y + Y*M
             doubly_noisy = torch.clamp(doubly_noisy, 0, 1)
             return doubly_noisy, input, img_path
+            #     elif self.mode == 'finetune':
+            # # Rayleigh-distributed multiplicative speckle noise
+            # sigma = self.noise_std  # values like 0.1, 0.25, 0.5, 0.75
+            # U = torch.rand_like(image)
+            # rayleigh = sigma * torch.sqrt(-2.0 * torch.log(U + 1e-8))
+            # #print("Rayleigh noise generated")
+            # # Normalize to mean = 1 to keep image brightness consistent
+            # rayleigh = rayleigh / rayleigh.mean()
+
+            # doubly_noisy = image * rayleigh
+            # doubly_noisy = torch.clamp(doubly_noisy, 0, 1)
+            # return doubly_noisy, image, img_path
 
     def get_stats(self):
         return {
