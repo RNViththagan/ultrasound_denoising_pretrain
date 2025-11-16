@@ -20,7 +20,7 @@ class UltrasoundDataset(Dataset):
         self.image_paths = []
         self.class_counts = {}  # For BUSI: {'benign': N, 'malignant': N, 'normal': N}; For HC18: {'hc18': N}
         self.sample_image_path = None  # Path to sample image for visualization flow
-
+        print("📂 old meth")
         # Define augmentation pipeline for training
         self.augmentation = None
         if augment:
@@ -107,7 +107,15 @@ class UltrasoundDataset(Dataset):
         image = image.unsqueeze(0)  # Shape: [1, 1, H, W]
         image = F.interpolate(image, size=(256, 256), mode='bilinear', align_corners=False)
         image = image.squeeze(0)  # Shape: [1, H, W]
-
+        def _add_rayleigh_speckle(image: torch.Tensor, mean: float = 1.0) -> torch.Tensor:
+            """
+            Multiplicative Rayleigh speckle (Eq. 1 in the paper).
+            image : [1, H, W] in [0,1]
+            mean  : mean of the Rayleigh distribution (paper uses 1.0 → variance ≈ 0.429)
+            """
+            u = torch.rand_like(image) + 1e-8
+            speckle = torch.sqrt(-torch.log(u)) * mean
+            return image * speckle
         if self.mode == 'pretrain':
             # Noise2Void: masked input
             mask = torch.ones_like(image)
@@ -115,6 +123,17 @@ class UltrasoundDataset(Dataset):
             mask.view(-1)[mask_indices] = 0
             masked_image = image * mask
             return masked_image, image, mask, img_path
+        # else:   # mode == 'finetune'  →  Paper-Exact Noisier2Noise
+        #     # 1) Multiplicative Rayleigh speckle (dominant term)
+        #     noisy = _add_rayleigh_speckle(image, mean=1.0)
+
+        #     # 2) Tiny additive Gaussian (σ = 0.02)
+        #     additive_std = self.noise_std                   # <-- paper’s “lower impact” additive term
+        #     additive = torch.randn_like(image) * additive_std
+        #     noisy = noisy + additive
+        #     noisy = torch.clamp(noisy, 0.0, 1.0)
+
+        #     return noisy, image, img_path   
         else:
             # Noisier2Noise: doubly-noisy input (Z = Y + Y*M)
             noise = torch.randn_like(image) * self.noise_std
